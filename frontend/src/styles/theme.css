@@ -1,0 +1,18 @@
+@theme {
+  --color-primary: #0F0F14;
+  --color-secondary: #F0A040;
+  --color-tertiary: #06B6D4;
+  --color-surface: #0F0F14;
+  --color-surface-dim: #0A0A0F;
+  --color-surface-bright: #1A1A24;
+  --color-surface-variant: #1E1E28;
+  --color-on-surface: #E8E8F0;
+  --color-on-surface-variant: #8A8A9A;
+  --color-on-surface-dim: #5A5A6A;
+  --color-error: #EF4444;
+  --color-success: #22C55E;
+  --color-warning: #EAB308;
+  --color-border: #2A2A35;
+  --color-divider: #1A1A24;
+  --color-input-placeholder: #8A8A9A;
+}
