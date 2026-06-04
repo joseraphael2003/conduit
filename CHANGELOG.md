@@ -34,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`backend/run_test_backend.py`** — Mock backend server for E2E tests (mocked Whisper transcription, Fireworks AI, ffmpeg video generation)
 - **`frontend/tests/global-setup.ts`** — Playwright global setup for E2E test suite
 
+#### AI Prompt Design
+- **Structural marker cleaning** — Added to `DESIGN_SPEC.md` §3.5 Step 1a system prompt:
+  - Section headers (e.g., "Chapter 1", "Introduction", "Part 1")
+  - Speaker labels (e.g., "NARRATOR:", "HOST:")
+  - Stage directions (e.g., "[sighs]", "[pause]")
+  - Formatting markers (e.g., "---", "TITLE CARD", "END")
+  - AI treats these as intentional omissions that should NOT appear in the final `source_of_truth_script.txt`
+
 #### Backend Refinements
 - **`GET /api/v1/projects/{uuid}/characters`** — Retrieve character list from `characters.json`
 - **`backend/tests/test_characters.py`** — Added tests for `GET /characters` endpoint
@@ -53,9 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Ghost button background** — `button.tsx` ghost variant now explicitly `bg-transparent` to match design system
 - **Stepper clickability** — Incomplete future steps are now properly disabled, preventing user skip-ahead
+- **Whisper Pydantic models** — `services/whisper.py` now converts `TranscriptionWord` objects to dicts using `model_dump()` before returning. Fixes `AttributeError: 'TranscriptionWord' object has no attribute 'get'` during voiceover upload and SRT generation.
 
 ### Known Issues
-- **ffmpeg version** — 4.0 (older than recommended 6.x+ but functional; zoompan validated)
+- ~~**ffmpeg version** — 4.0 (older than recommended 6.x+ but functional; zoompan validated)~~ **Resolved** — Upgraded to 8.1.1
 - **OpenAI API key** — Validated working (billing added during Session 2)
 - **lucide-react** — Removed from `package.json`; `components.json` updated to `@phosphor-icons/react`
 
@@ -162,7 +171,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SRT path consistency** — `services/srt.py` now uses `PROJECTS_BASE_DIR` matching other routers
 
 ### Known Issues
-- **ffmpeg version** — 4.0 (older than recommended 6.x+ but functional; zoompan validated)
+- ~~**ffmpeg version** — 4.0 (older than recommended 6.x+ but functional; zoompan validated)~~ **Resolved** — Upgraded to 8.1.1
 - **OpenAI API key** — Validated working (billing added during Session 2)
 - **lucide-react** — Removed from `package.json`; `components.json` updated to `@phosphor-icons/react`
 

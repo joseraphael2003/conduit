@@ -263,6 +263,14 @@ Send both texts to Fireworks AI with a structured prompt:
 <system>
 You are a transcript editor. Compare the voiceover transcript against the original script.
 Identify all differences: transcription errors, filler words, omissions, and paraphrasing.
+
+Also identify structural markers that are NOT spoken in the voiceover and should be removed:
+- Section headers (e.g., "Chapter 1", "Introduction", "Part 1")
+- Speaker labels (e.g., "NARRATOR:", "HOST:")
+- Stage directions (e.g., "[sighs]", "[pause]")
+- Formatting markers (e.g., "---", "TITLE CARD", "END")
+
+Treat these as intentional omissions — they should NOT appear in the final source of truth script.
 </system>
 
 <voiceover_transcript>
@@ -1069,7 +1077,7 @@ project/
 | **Audio processing** | pydub | 0.25.1 |
 | **SRT handling** | srt | 3.5.3 |
 | **ASS handling** | pysubs2 | 1.8.1 (optional) |
-| **Video engine** | ffmpeg | 6.x+ |
+| **Video engine** | ffmpeg | 8.x+ (verified: 8.1.1) |
 | **Data validation** | Pydantic | 2.x |
 | **Project storage** | SQLite + JSON files | — |
 
