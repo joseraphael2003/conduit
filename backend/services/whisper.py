@@ -22,7 +22,7 @@ async def transcribe_audio(file_path: str) -> dict:
                 response_format="verbose_json",
                 timestamp_granularities=["word"]
             )
-        return {"words": response.words}
+        return {"words": [w.model_dump() for w in response.words]}
 
     last_exception = None
     for attempt in range(max_retries + 1):
