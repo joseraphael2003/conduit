@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { SkeletonTable } from "@/components/SkeletonTable";
+import { AmberBar } from "@/components/AmberBar";
 import {
-  Spinner,
   Scissors,
   ArrowsMerge,
   Wrench,
@@ -124,12 +125,30 @@ export function Step3Segments() {
     setPromptErrors((prev) => ({ ...prev, [index]: null }));
 
     try {
+      // Fetch full segment list from server
+      const getResponse = await fetch(
+        `http://localhost:8000/api/v1/projects/${uuid}/segments`
+      );
+      if (!getResponse.ok) {
+        throw new Error(`Fetch failed: ${getResponse.status}`);
+      }
+      const fullData = await getResponse.json();
+      const fullSegments = fullData.segments || [];
+
+      // Apply local edit to the matching segment
+      const updatedSegments = fullSegments.map((seg: any) =>
+        seg.segment_index === segment.segment_index
+          ? { ...seg, prompt: segment.prompt }
+          : seg
+      );
+
+      // PUT complete list
       const response = await fetch(
         `http://localhost:8000/api/v1/projects/${uuid}/segments`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ segments: [segment] }),
+          body: JSON.stringify({ segments: updatedSegments }),
         }
       );
       if (!response.ok) {
@@ -224,7 +243,7 @@ export function Step3Segments() {
     <div className="flex flex-col gap-6 h-full">
       {/* Error Banner */}
       {error && (
-        <div className="flex items-center gap-3 bg-[#EF4444]/10 border border-[#EF4444]/20 p-3">
+        <div className="flex items-center gap-3 bg-[#EF4444]/10 border border-[#EF4444]/20 p-3" role="alert" aria-live="assertive">
           <Warning size={20} weight="regular" className="text-[#EF4444] shrink-0" />
           <span className="font-body text-sm text-[#EF4444] flex-1">{error}</span>
           <button
@@ -249,7 +268,7 @@ export function Step3Segments() {
           )}
         >
           {loading ? (
-            <Spinner size={16} weight="regular" className="animate-spin" />
+            <AmberBar />
           ) : (
             <Wrench size={16} weight="regular" />
           )}
@@ -267,7 +286,7 @@ export function Step3Segments() {
             )}
           >
             {loading ? (
-              <Spinner size={16} weight="regular" className="animate-spin" />
+              <AmberBar />
             ) : (
               <PencilSimple size={16} weight="regular" />
             )}
@@ -275,6 +294,13 @@ export function Step3Segments() {
           </button>
         )}
       </div>
+
+      {/* Segment Loading */}
+      {loading && segments.length === 0 && (
+        <div className="flex-1 overflow-auto">
+          <SkeletonTable columns={7} />
+        </div>
+      )}
 
       {/* Segment Table */}
       {segments.length > 0 && (
@@ -338,11 +364,9 @@ export function Step3Segments() {
                         rows={2}
                       />
                       {savingPrompt[index] && (
-                        <Spinner
-                          size={14}
-                          weight="regular"
-                          className="absolute top-2 right-2 text-[#8A8A9A] animate-spin"
-                        />
+                        <div className="absolute top-2 right-2">
+                          <AmberBar />
+                        </div>
                       )}
                       {promptErrors[index] && (
                         <span className="absolute bottom-0 left-0 right-0 text-[10px] text-[#EF4444] bg-[#EF4444]/10 px-2 py-0.5">
@@ -420,7 +444,7 @@ export function Step3Segments() {
 
       {/* Prompts Generated Banner */}
       {promptsGenerated && (
-        <div className="flex items-center gap-3 bg-[#22C55E]/10 border border-[#22C55E]/20 p-3">
+        <div className="flex items-center gap-3 bg-[#22C55E]/10 border border-[#22C55E]/20 p-3" role="alert" aria-live="assertive">
           <Check size={20} weight="regular" className="text-[#22C55E] shrink-0" />
           <span className="font-body text-sm text-[#22C55E]">
             Prompts generated successfully.

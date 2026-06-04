@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from services.fireworks import FireworksClient
 from services.state import get_state, update_state
+from services.effects import validate_effect
 from models.state import ProjectState
 
 segments_router = APIRouter()
@@ -20,6 +21,7 @@ class SegmentBreakdown(BaseModel):
     start_time: float
     end_time: float
     duration: float
+    effect: str = "none"
 
 
 class Segments(BaseModel):
@@ -34,6 +36,7 @@ class SegmentPrompt(BaseModel):
     start_time: float
     end_time: float
     duration: float
+    effect: str = "none"
 
 
 class SegmentPrompts(BaseModel):
@@ -43,6 +46,10 @@ class SegmentPrompts(BaseModel):
 class SplitRequest(BaseModel):
     word_index: Optional[int] = None
     timestamp: Optional[float] = None
+
+
+class SegmentEffectUpdate(BaseModel):
+    effect: str
 
 
 def _get_project_dir(uuid: str) -> str:
@@ -213,9 +220,10 @@ async def breakdown_segments(uuid: str):
         )
 
     segments = result["segments"]
-    # Ensure each segment has a segment_index
+    # Ensure each segment has a segment_index and effect
     for i, seg in enumerate(segments):
         seg["segment_index"] = i
+        seg.setdefault("effect", "none")
 
     # Save segments.json
     segments_path = os.path.join(conduit_dir, "segments.json")
@@ -378,6 +386,56 @@ async def merge_segment(uuid: str, segment_index: int):
     return Segments(segments=segments)
 
 
+@segments_router.get("/projects/{uuid}/segments", response_model=Segments)
+async def get_segments(uuid: str):
+    """Get all segments for a project."""
+    conduit_dir = _get_conduit_dir(uuid)
+    segments_path = os.path.join(conduit_dir, "segments.json")
+
+    if not os.path.exists(segments_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="segments.json not found",
+        )
+
+    data = _load_json(segments_path)
+    segments = [SegmentBreakdown(**seg) for seg in data.get("segments", [])]
+    return Segments(segments=segments)
+
+
+@segments_router.put("/projects/{uuid}/segments/{segment_index}/effect")
+async def update_segment_effect(uuid: str, segment_index: int, request: SegmentEffectUpdate):
+    """Update the effect for a specific segment."""
+    if not validate_effect(request.effect):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid effect: {request.effect}",
+        )
+
+    conduit_dir = _get_conduit_dir(uuid)
+    segments_path = os.path.join(conduit_dir, "segments.json")
+
+    if not os.path.exists(segments_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="segments.json not found",
+        )
+
+    data = _load_json(segments_path)
+    segments = data.get("segments", [])
+
+    if segment_index < 0 or segment_index >= len(segments):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid segment_index",
+        )
+
+    segments[segment_index]["effect"] = request.effect
+    _save_json(segments_path, {"segments": segments})
+
+    return {"segment_index": segment_index, "effect": request.effect}
+
+
 @segments_router.post("/projects/{uuid}/segments/prompts", response_model=SegmentPrompts)
 async def generate_segment_prompts(uuid: str):
     """Generate image prompts for each segment using Fireworks AI.
@@ -452,6 +510,7 @@ async def generate_segment_prompts(uuid: str):
         else:
             seg.setdefault("segment_prompt", "")
             seg.setdefault("characters_present", [])
+        seg.setdefault("effect", "none")
         updated_segments.append(seg)
 
     # Save segments.json (preserves breakdown data, adds prompts)

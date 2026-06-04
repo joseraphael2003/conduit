@@ -159,6 +159,46 @@ async def test_extract_characters_fireworks_failure(async_client, cleanup_projec
 
 
 @pytest.mark.asyncio
+async def test_get_characters_happy_path(async_client, cleanup_projects, created_project):
+    """GET /characters returns 200 with character array."""
+    project_uuid = created_project["uuid"]
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    characters_path = os.path.join(project_dir, "characters.json")
+
+    data = {
+        "characters": [
+            {
+                "name": "Alice",
+                "type": "protagonist",
+                "importance": "main",
+                "description": "Brave knight.",
+            }
+        ]
+    }
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+    response = await async_client.get(f"/api/v1/projects/{project_uuid}/characters")
+    assert response.status_code == 200
+    result = response.json()
+    assert "characters" in result
+    assert len(result["characters"]) == 1
+    assert result["characters"][0]["name"] == "Alice"
+    assert result["characters"][0]["type"] == "protagonist"
+    assert result["characters"][0]["importance"] == "main"
+    assert result["characters"][0]["description"] == "Brave knight."
+
+
+@pytest.mark.asyncio
+async def test_get_characters_not_found(async_client, cleanup_projects, created_project):
+    """GET /characters for non-existent project returns 404."""
+    project_uuid = created_project["uuid"]
+    response = await async_client.get(f"/api/v1/projects/{project_uuid}/characters")
+    assert response.status_code == 404
+    assert "characters.json not found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_update_characters(async_client, cleanup_projects, created_project):
     """PUT characters persists edited list and returns updated data."""
     project_uuid = created_project["uuid"]

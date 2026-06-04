@@ -109,6 +109,24 @@ async def extract_characters(project_uuid: str):
     return CharacterList(**result)
 
 
+@characters_router.get(
+    "/projects/{project_uuid}/characters",
+    response_model=CharacterList,
+)
+async def get_characters(project_uuid: str):
+    """Retrieve the project's character list from characters.json."""
+    project_dir = os.path.join(_projects_module.PROJECTS_BASE_DIR, project_uuid)
+    characters_path = os.path.join(project_dir, "characters.json")
+    if not os.path.exists(characters_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="characters.json not found",
+        )
+    with open(characters_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return CharacterList(**data)
+
+
 @characters_router.put(
     "/projects/{project_uuid}/characters",
     response_model=CharacterList,

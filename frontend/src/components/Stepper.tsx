@@ -1,3 +1,5 @@
+import { useState, useEffect } from "react";
+import { useParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import {
   FileText,
@@ -12,6 +14,10 @@ interface StepperProps {
   onStepClick: (step: number) => void;
 }
 
+interface ProjectState {
+  state: string;
+}
+
 const steps = [
   { label: "Script", icon: FileText },
   { label: "Characters", icon: User },
@@ -20,14 +26,49 @@ const steps = [
   { label: "Video", icon: FilmStrip },
 ];
 
+const apiBase = "http://localhost:8000/api/v1";
+
 export function Stepper({ currentStep, onStepClick }: StepperProps) {
+  const { uuid } = useParams();
+  const [projectState, setProjectState] = useState<ProjectState | null>(null);
+
+  useEffect(() => {
+    if (!uuid) return;
+    const fetchProjectState = async () => {
+      try {
+        const response = await fetch(`${apiBase}/projects/${uuid}/state`);
+        if (!response.ok) return;
+        const data = await response.json() as ProjectState;
+        setProjectState(data);
+      } catch {
+        // silent fail on initial load
+      }
+    };
+    fetchProjectState();
+  }, [uuid]);
+
+  const isStepComplete = (step: number): boolean => {
+    if (!projectState) return false;
+    const stateMap: Record<string, number> = {
+      created: 0,
+      step_1_complete: 1,
+      step_2_complete: 2,
+      step_3_complete: 3,
+      step_4_complete: 4,
+      step_5_complete: 5,
+    };
+    const completedSteps = stateMap[projectState.state] ?? 0;
+    return step <= completedSteps;
+  };
+
   return (
     <>
       {steps.map((step, index) => {
         const stepNumber = index + 1;
         const isActive = stepNumber === currentStep;
-        const isCompleted = stepNumber < currentStep;
-        const isPending = stepNumber > currentStep;
+        const isCompleted = isStepComplete(stepNumber);
+        const isPending = !isActive && !isCompleted;
+        const isClickable = stepNumber <= currentStep || (stepNumber === currentStep + 1 && isStepComplete(currentStep));
 
         const Icon = step.icon;
 
@@ -35,8 +76,10 @@ export function Stepper({ currentStep, onStepClick }: StepperProps) {
           <div key={step.label} className="flex items-center flex-1 justify-center">
             <button
               onClick={() => onStepClick(stepNumber)}
+              disabled={!isClickable}
               className={cn(
-                "flex items-center gap-2 px-3 py-2 cursor-pointer select-none",
+                "flex items-center gap-2 px-3 py-2 select-none",
+                isClickable ? "cursor-pointer" : "cursor-not-allowed opacity-50",
                 isActive && "text-[#F0A040]",
                 isCompleted && "text-[#06B6D4]",
                 isPending && "text-[#5A5A6A]"

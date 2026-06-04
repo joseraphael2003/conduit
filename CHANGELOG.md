@@ -5,16 +5,166 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — Session 3: Video Generation (Planned)
+## [0.4.0] — 2026-06-04 — Session 4: Polish
 
-### Planned
-- Step 5 Video Generation — ffmpeg pipeline, 1080p24 H.264, concat
-- Caption burning (optional, per-segment)
-- SRT download at Step 5
-- Per-segment random motion effects (pan/zoom)
-- User override for motion effects
-- Step 1 frontend (deferred from Session 2)
-- Complete wizard navigation with Next/Back buttons
+### Added
+
+#### Accessibility Audit (WCAG 2.1 AA)
+- **`role="alert"` + `aria-live="assertive"`** on all error/success banners across Steps 1–5
+- **`aria-expanded` + `aria-controls`** on all collapsible toggles (Original Script, JSON, Console)
+- **`aria-label` + `aria-current="step"`** on stepper buttons for screen-reader navigation
+- **`role="progressbar"` + `aria-valuenow` + `aria-valuemax`** on video generation progress bar
+- **`role="dialog"` + `aria-modal="true"`** on Step 4 details modal
+- **`useFocusTrap` hook** (`frontend/src/hooks/useFocusTrap.ts`) — modal focus trapping, Escape-to-close, focus return
+- **Keyboard accessibility** — Step 1 dropzone (`tabindex="0"`, `role="button"`, `aria-label`)
+- **`SkeletonTable` component** (`frontend/src/components/SkeletonTable.tsx`) with `aria-busy="true"`, `role="status"`, `aria-label="Loading"`
+- **`prefers-reduced-motion`** media query in `frontend/src/styles/index.css` — disables all decorative animations for users with motion sensitivity
+
+#### UI Refinements
+- **`AmberBar` component** (`frontend/src/components/AmberBar.tsx`) — animated amber loading indicator
+- **`animate-shimmer` CSS** (`frontend/src/styles/index.css`) — skeleton-screen shimmer animation
+- **Ghost button transparency** — `button.tsx` ghost variant now uses `bg-transparent` with explicit hover states
+- **Stepper state enforcement** — reads backend `projectState` for `isStepComplete`; disables skip-ahead with `cursor-not-allowed` and `opacity-50`
+- **Cascade warning UI** — Stepper and `WizardShell` invalidate downstream steps on edit; E2E tests verify segments.json deletion and image preservation
+
+#### End-to-End Integration Testing
+- **`frontend/tests/e2e-happy-path.spec.ts`** (7 tests) — Full 5-step wizard flow: create project → upload voiceover → extract characters → generate segments → upload images → generate video → verify output files
+- **`frontend/tests/e2e-error-paths.spec.ts`** (2 tests) — Corrupted voiceover upload shows error banner and stays at Step 1; editing Step 2 triggers cascade invalidation and preserves images
+- **`frontend/tests/accessibility-gaps.spec.ts`** (14 tests) — Per-page a11y attribute verification (role, aria-live, aria-expanded, aria-controls, aria-label, aria-current, aria-modal, focus trap, keyboard accessibility)
+- **`backend/run_test_backend.py`** — Mock backend server for E2E tests (mocked Whisper transcription, Fireworks AI, ffmpeg video generation)
+- **`frontend/tests/global-setup.ts`** — Playwright global setup for E2E test suite
+
+#### Backend Refinements
+- **`GET /api/v1/projects/{uuid}/characters`** — Retrieve character list from `characters.json`
+- **`backend/tests/test_characters.py`** — Added tests for `GET /characters` endpoint
+- **`backend/tests/test_projects.py`** — Added cascade invalidation tests and transcript endpoint tests
+
+#### Testing
+- **Backend Tests:** 102 tests (up from 96 in Session 3)
+- **Frontend Tests:** 75 tests (up from 52 in Session 3)
+- **Total:** 177 tests
+
+### Changed
+- **`frontend/src/components/Stepper.tsx`** — Now fetches `projectState` from backend to determine completed steps; adds `disabled` and `aria-label` attributes
+- **`frontend/src/components/WizardShell.tsx`** — Step completion logic synced with backend state; Next button disabled until current step complete
+- **`frontend/src/pages/Step4Images.tsx`** — Modal uses `useFocusTrap` hook; adds `aria-modal` and `aria-label` attributes
+- **`frontend/src/styles/index.css`** — Added `animate-shimmer` keyframes and `prefers-reduced-motion` rules
+
+### Fixed
+- **Ghost button background** — `button.tsx` ghost variant now explicitly `bg-transparent` to match design system
+- **Stepper clickability** — Incomplete future steps are now properly disabled, preventing user skip-ahead
+
+### Known Issues
+- **ffmpeg version** — 4.0 (older than recommended 6.x+ but functional; zoompan validated)
+- **OpenAI API key** — Validated working (billing added during Session 2)
+- **lucide-react** — Removed from `package.json`; `components.json` updated to `@phosphor-icons/react`
+
+---
+
+## [0.3.0] — 2026-06-04 — Session 3: Video Generation + Step 1 Frontend
+
+### Added
+
+#### Backend — Video Generation (Step 5)
+- **ffmpeg Pipeline Service** (`backend/services/ffmpeg.py`)
+  - `generate_segment_clip()` — 7 effects: none, zoom_in, zoom_out, pan_left, pan_right, pan_up, pan_down
+  - `concat_segments()` — ffconcat demuxer with `-c copy`
+  - `mix_audio()` — voiceover mix with `-c:v copy -c:a aac -shortest`
+  - `burn_captions()` — SRT subtitle burn via ffmpeg `subtitles` filter
+  - `generate_video()` — async orchestrator with temp directory, progress tracking, cleanup
+  - Uses `subprocess.run` with `capture_output=True`, `check=True`
+  - Progress written to `state.json` under `video_progress` key
+
+- **Motion Effects Service** (`backend/services/effects.py`)
+  - `EFFECTS` dict with zoom/pan parameters for 6 motion effects
+  - `build_zoompan_filter()` — generates ffmpeg zoompan filter strings
+  - `random_assign_effects()` — random assignment with no adjacent duplicates
+  - `validate_effect()` — effect name validation
+
+- **Video Router** (`backend/routers/video.py`)
+  - `POST /api/v1/projects/{uuid}/video/generate` — validates images, triggers ffmpeg pipeline
+  - `GET /api/v1/projects/{uuid}/video/status` — returns idle/processing/completed/error status
+  - `GET /api/v1/projects/{uuid}/video/download` — serves `output/output.mp4`
+  - `GET /api/v1/projects/{uuid}/video/srt` — serves `captions.srt` with `Content-Disposition: attachment`
+  - `GET /api/v1/projects/{uuid}/video/ass` — serves `captions.ass` (optional)
+
+#### Backend — Step 1 Transcription Wiring
+- **Voiceover Upload Endpoint** (`backend/routers/projects.py`)
+  - `POST /api/v1/projects/{uuid}/voiceover` now triggers full transcription pipeline:
+    - Calls `services.whisper.py` `transcribe_audio()`
+    - Calls `services.chunking.py` `chunk_audio()` if file > 25MB
+    - Calls `services.srt.py` `generate_srt()` with transcription result
+    - Saves `transcript.json` to project directory
+    - Updates state to `step_1_complete`
+  - `GET /api/v1/projects/{uuid}/transcript` — returns transcript data
+  - Fixed `services.srt.py` path to use `PROJECTS_BASE_DIR` consistently
+
+#### Backend — Segment Schema Updates
+- **Effect Field** (`backend/routers/segments.py`)
+  - Added `effect` field to segment schema (default `"none"`)
+  - `PUT /api/v1/projects/{uuid}/segments/{segment_index}/effect` — validates and updates effect
+  - Split/merge endpoints preserve effect field
+
+#### Frontend — Step 1 Script Page
+- **`frontend/src/pages/Step1Script.tsx`**
+  - Voiceover upload dropzone (full width, 200px height, drag-and-drop + click)
+  - Progress bar during upload (amber fill)
+  - Transcript display (scrollable 600px area, `body-md` Source Sans 3)
+  - Original Script input (collapsible textarea with monospace font)
+  - AI Diff UI — side-by-side diff view (GitHub-style) with word-level LCS algorithm
+  - Changes highlighted in `success` green (#22C55E) and `error` red (#EF4444)
+  - Approve/Reject buttons per change block
+  - Error handling with retry banner
+
+#### Frontend — Step 5 Video Page
+- **`frontend/src/pages/Step5Video.tsx`**
+  - Effect selection grid — per-segment dropdown with 7 options
+  - Auto-assign — random effect assignment on first load (excluding adjacent duplicates)
+  - Randomize button (ghost, Shuffle icon) — re-assigns all effects
+  - Burn captions checkbox (unchecked by default)
+  - Download SRT button (ghost, Download icon)
+  - Generate Video button (amber primary, disabled if images missing)
+  - Progress bar (full-width amber bar, "Processing segment N of M...")
+  - Download Video button (appears after generation)
+  - Console output panel (collapsible, `mono-sm`, `surface-dim` background, auto-scroll)
+
+#### Frontend — Wizard Navigation Completion
+- **`frontend/src/components/WizardShell.tsx`**
+  - Added `useNavigate` + `useParams` for React Router navigation
+  - Step completion enforcement — Next button disabled until current step is complete
+  - Step 1 and Step 5 rendering in `renderStepContent()` switch/case
+  - `handleBack`/`handleNext` navigate to `/project/:uuid/step/{N}`
+  - Fetches project state from `GET /api/v1/projects/{uuid}/state`
+
+- **`frontend/src/components/Stepper.tsx`**
+  - Step completion colors: completed = teal (#06B6D4), current = amber (#F0A040), pending = dim (#5A5A6A)
+  - Step click disabled for incomplete steps (prevents skipping ahead)
+
+#### Testing
+- **Backend Tests:** `test_video.py` (45 tests)
+  - Video endpoints: generate, status, download, SRT (happy path + error cases)
+  - Segment effects: update, invalid, not found, out of bounds
+  - Effects service: all 6 effects, random assign, zoompan filter generation
+  - FFmpeg service: all 7 effects, concat, mix, burn, orchestrator
+  - All mocked with `unittest.mock.patch` for subprocess
+
+- **Frontend Tests:** `step1.spec.ts` (7 tests), `step5.spec.ts` (10 tests)
+  - Step 1: dropzone, transcript, diff UI, Next button disabled/enabled, error retry, border-radius, fonts
+  - Step 5: effect grid, randomize, burn captions, generate disabled/enabled, progress bar, download, console, error, border-radius, fonts
+
+### Changed
+- **Frontend build config** — `vite.config.ts` added `resolve.alias` for `@/lib/utils` path resolution
+- **Backend tests** — Total: 96 tests (up from 51 in Session 2)
+- **Frontend tests** — Total: 52 tests (up from 34 in Session 2)
+
+### Fixed
+- **Vite path alias** — `@/lib/utils` import failed in dev server; fixed by adding alias to `vite.config.ts`
+- **SRT path consistency** — `services/srt.py` now uses `PROJECTS_BASE_DIR` matching other routers
+
+### Known Issues
+- **ffmpeg version** — 4.0 (older than recommended 6.x+ but functional; zoompan validated)
+- **OpenAI API key** — Validated working (billing added during Session 2)
+- **lucide-react** — Removed from `package.json`; `components.json` updated to `@phosphor-icons/react`
 
 ---
 
@@ -347,19 +497,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Status:** ✅ COMPLETE — 16 tasks, 3 waves, 4-phase verification passed.
 **Deliverables:** Fireworks AI client, character/segment/image endpoints, cascade logic for Steps 2–4, frontend pages for Steps 2–4, 51 backend tests + 34 frontend tests.
 
-### Session 3 (Planned) — Video Generation
-**Goal:** Step 5 video generation (ffmpeg pipeline), Step 1 frontend, caption burning, SRT download.
-**Status:** PENDING
+### Session 3 (2026-06-04) — Video Generation + Step 1 Frontend
+**Goal:** Step 5 video generation (ffmpeg pipeline), Step 1 frontend (voiceover upload + transcription + diff UI), caption burning, SRT download, complete wizard navigation.
+**Status:** ✅ COMPLETE — 17 tasks, 3 waves, 4-phase verification passed.
+**Deliverables:** ffmpeg pipeline service, motion effects logic, video generation/status/download/SRT endpoints, Step 1 and Step 5 frontend pages, wizard navigation completion, 96 backend tests + 52 frontend tests.
 
-### Session 4 (Planned) — Polish
-**Goal:** UI refinements, cascade warning UI, accessibility, end-to-end testing.
-**Status:** PENDING
+### Session 4 (2026-06-04) — Polish
+**Goal:** UI refinements, cascade warning UI, accessibility audit (WCAG 2.1 AA), end-to-end integration testing (full wizard flow).
+**Status:** ✅ COMPLETE — 12 tasks, 3 waves, 4-phase verification passed.
+**Deliverables:** Accessibility attributes across all 5 steps, `useFocusTrap` hook, `SkeletonTable`/`AmberBar` loading components, ghost button transparency fix, E2E happy path + error path + accessibility gap tests, mock test backend, 102 backend tests + 75 frontend tests.
 
 ---
 
 ## File Inventory
 
-### Backend (22 Python files)
+### Backend (25 Python files)
 ```
 backend/main.py
 backend/models/database.py
@@ -371,12 +523,15 @@ backend/routers/projects.py
 backend/routers/characters.py
 backend/routers/segments.py
 backend/routers/images.py
+backend/routers/video.py
 backend/services/__init__.py
 backend/services/fireworks.py
 backend/services/whisper.py
 backend/services/chunking.py
 backend/services/srt.py
 backend/services/state.py
+backend/services/ffmpeg.py
+backend/services/effects.py
 backend/tests/__init__.py
 backend/tests/conftest.py
 backend/tests/test_projects.py
@@ -384,27 +539,39 @@ backend/tests/test_characters.py
 backend/tests/test_segments.py
 backend/tests/test_images.py
 backend/tests/test_fireworks.py
+backend/tests/test_video.py
 backend/utils/__init__.py
 ```
 
-### Frontend (10 TSX files + 5 test files)
+### Frontend (16 TSX files + 10 test files)
 ```
 frontend/src/main.tsx
 frontend/src/App.tsx
 frontend/src/components/WizardShell.tsx
 frontend/src/components/Stepper.tsx
 frontend/src/components/ui/button.tsx
+frontend/src/components/AmberBar.tsx
+frontend/src/components/SkeletonTable.tsx
+frontend/src/hooks/useFocusTrap.ts
 frontend/src/pages/Dashboard.tsx
+frontend/src/pages/Step1Script.tsx
 frontend/src/pages/Step2Characters.tsx
 frontend/src/pages/Step3Segments.tsx
 frontend/src/pages/Step4Images.tsx
+frontend/src/pages/Step5Video.tsx
 frontend/src/styles/theme.css
 frontend/src/styles/index.css
 frontend/tests/dashboard.spec.ts
 frontend/tests/wizard.spec.ts
+frontend/tests/step1.spec.ts
 frontend/tests/step2.spec.ts
 frontend/tests/step3.spec.ts
 frontend/tests/step4.spec.ts
+frontend/tests/step5.spec.ts
+frontend/tests/accessibility-gaps.spec.ts
+frontend/tests/e2e-error-paths.spec.ts
+frontend/tests/e2e-happy-path.spec.ts
+frontend/tests/global-setup.ts
 ```
 
 ### Design & Planning
@@ -430,13 +597,16 @@ frontend/components.json
 |---------|--------------|----------------|-------|
 | Session 1 | 8 | 14 | 22 |
 | Session 2 | 51 | 34 | 85 |
+| Session 3 | 96 | 52 | 148 |
+| Session 4 | 102 | 75 | 177 |
 
 ### Backend Test Breakdown
 - `test_fireworks.py` — 9 tests (client, base_url, retry logic, json_schema, error handling)
 - `test_characters.py` — 8 tests (extract, prompts, missing script, prerequisite, failures, update)
 - `test_segments.py` — 14 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback)
 - `test_images.py` — 9 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found)
-- `test_projects.py` — 11 tests (CRUD, cascade, state machine, Whisper mock, not found)
+- `test_projects.py` — 11 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript)
+- `test_video.py` — 45 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters)
 
 ### Frontend Test Breakdown
 - `dashboard.spec.ts` — 5 tests (empty state, Create Project button, project card, fonts, background)
@@ -444,6 +614,11 @@ frontend/components.json
 - `step2.spec.ts` — 5 tests (extract button, table rows, edit, copy, JSON toggle)
 - `step3.spec.ts` — 8 tests (generate button, table rows, editable prompts, split/merge, error, prompts button, radius, font)
 - `step4.spec.ts` — 7 tests (grid cells, upload button, details button, placeholder, thumbnail, details modal, upload flow)
+- `step1.spec.ts` — 7 tests (dropzone, transcript, diff UI, Next button disabled/enabled, error retry, radius, font)
+- `step5.spec.ts` — 10 tests (effect grid, randomize, burn captions, generate disabled/enabled, progress bar, download, console, error, radius, font)
+- `accessibility-gaps.spec.ts` — 14 tests (role="alert", aria-live, aria-expanded, aria-controls, aria-label, aria-current, aria-modal, focus trap, keyboard accessibility, progress bar ARIA, total alert count, total expanded count)
+- `e2e-error-paths.spec.ts` — 2 tests (corrupted voiceover upload, cascade invalidation preserves images)
+- `e2e-happy-path.spec.ts` — 7 tests (create project, upload voiceover, extract characters, generate segments, upload images, generate video, verify output files)
 
 ---
 
@@ -460,6 +635,7 @@ frontend/components.json
 ### Characters
 - `POST /api/v1/projects/{uuid}/characters/extract` — Extract characters from script
 - `POST /api/v1/projects/{uuid}/characters/prompts` — Generate character prompts
+- `GET /api/v1/projects/{uuid}/characters` — Get character list
 - `PUT /api/v1/projects/{uuid}/characters` — Update characters
 
 ### Segments
@@ -472,6 +648,13 @@ frontend/components.json
 ### Images
 - `POST /api/v1/projects/{uuid}/images/{segment_index}` — Upload image
 - `GET /api/v1/projects/{uuid}/images/{segment_index}` — Get image
+
+### Video
+- `POST /api/v1/projects/{uuid}/video/generate` — Generate video from segments
+- `GET /api/v1/projects/{uuid}/video/status` — Get video generation status
+- `GET /api/v1/projects/{uuid}/video/download` — Download generated MP4
+- `GET /api/v1/projects/{uuid}/video/srt` — Download captions.srt
+- `GET /api/v1/projects/{uuid}/video/ass` — Download captions.ass
 
 ### Health
 - `GET /health` — Health check

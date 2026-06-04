@@ -1,17 +1,13 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Wizard Page', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:5173/project/test-uuid');
-    await page.waitForLoadState('networkidle');
-    // Inject missing CSS classes so design tokens are applied correctly during tests
+  async function injectStyles(page: any) {
     await page.addStyleTag({
       content: `
         .font-headline { font-family: 'Playfair Display', serif; }
         .font-body { font-family: 'Source Sans 3', sans-serif; }
       `,
     });
-    // Inject a hidden code element to verify mono font token
     await page.evaluate(() => {
       const code = document.createElement('code');
       code.className = 'font-mono';
@@ -20,26 +16,64 @@ test.describe('Wizard Page', () => {
       code.style.left = '-9999px';
       document.body.appendChild(code);
     });
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'created' }) });
+    });
+    await page.goto('http://localhost:5173/project/test-uuid');
+    await page.waitForLoadState('networkidle');
+    await injectStyles(page);
   });
 
   test('renders Conduit heading', async ({ page }) => {
+    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'created' }) });
+    });
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await injectStyles(page);
+
     const h1 = page.locator('h1');
     await expect(h1).toHaveText(/Conduit/);
     await page.screenshot({ path: 'test-results/wizard-heading.png' });
   });
 
   test('stepper has exactly 5 children', async ({ page }) => {
+    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'created' }) });
+    });
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await injectStyles(page);
+
     await expect(page.locator('.stepper > div')).toHaveCount(5);
     await page.screenshot({ path: 'test-results/wizard-stepper.png' });
   });
 
   test('active step has amber color', async ({ page }) => {
+    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'created' }) });
+    });
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await injectStyles(page);
+
     const activeStep = page.locator('button[aria-current="step"]');
     await expect(activeStep).toHaveCSS('color', 'rgb(240, 160, 64)');
     await page.screenshot({ path: 'test-results/wizard-active-step.png' });
   });
 
   test('completed step has teal color', async ({ page }) => {
+    await page.unroute('http://localhost:8000/api/v1/projects/**/state');
+    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'step_1_complete' }) });
+    });
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await injectStyles(page);
+
     // Click Next to advance to step 2, making step 1 completed
     await page.locator('button', { hasText: 'Next' }).click();
     await page.waitForTimeout(200);

@@ -23,7 +23,12 @@ def _get_project_dir(project_uuid: str) -> str:
 
 
 def _get_segments_path(project_uuid: str) -> str:
-    return os.path.join(_get_project_dir(project_uuid), "segments.json")
+    project_dir = _get_project_dir(project_uuid)
+    # Check .conduit/ first, then fallback to project root for backward compatibility
+    conduit_path = os.path.join(project_dir, ".conduit", "segments.json")
+    if os.path.exists(conduit_path):
+        return conduit_path
+    return os.path.join(project_dir, "segments.json")
 
 
 def _get_image_path(project_uuid: str, segment_index: int) -> str:

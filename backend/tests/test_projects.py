@@ -5,6 +5,7 @@ import pytest_asyncio
 import httpx
 import respx
 from httpx import Request
+from openai import APIStatusError
 
 # We import the app module for test-client setup
 from main import app
@@ -296,6 +297,81 @@ async def test_whisper_mock_respx(async_client, cleanup_projects):
             assert "whisper-1" in content, "Request should contain model='whisper-1'"
             assert 'name="response_format"' in content, "Request should contain response_format field"
             assert "verbose_json" in content, "Request should contain response_format='verbose_json'"
+    finally:
+        os.remove(audio_path)
+
+
+@pytest.mark.asyncio
+async def test_whisper_retry_success(async_client, cleanup_projects):
+    """Mock Whisper 500→500→200. Assert transcription succeeds on 3rd attempt."""
+    import tempfile
+    import services.whisper as whisper_module
+
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        tmp.write(b"\xff\xfb\x90\x00")
+        tmp.flush()
+        audio_path = tmp.name
+
+    try:
+        call_count = 0
+
+        def side_effect(request):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                return httpx.Response(500, json={"error": "Internal Server Error"})
+            return httpx.Response(
+                200,
+                json={
+                    "text": "Hello world",
+                    "words": [
+                        {"word": "Hello", "start": 0.0, "end": 0.5},
+                        {"word": "world", "start": 0.6, "end": 1.0},
+                    ],
+                },
+            )
+
+        with respx.mock:
+            route = respx.post("https://api.openai.com/v1/audio/transcriptions").mock(
+                side_effect=side_effect
+            )
+            result = await whisper_module.transcribe_audio(audio_path)
+            assert "words" in result
+            assert len(result["words"]) == 2
+            assert call_count == 3
+            assert route.call_count == 3
+    finally:
+        os.remove(audio_path)
+
+
+@pytest.mark.asyncio
+async def test_whisper_retry_failure(async_client, cleanup_projects):
+    """Mock Whisper 500×4. Assert transcription fails with specific error after 3 retries."""
+    import tempfile
+    import services.whisper as whisper_module
+
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        tmp.write(b"\xff\xfb\x90\x00")
+        tmp.flush()
+        audio_path = tmp.name
+
+    try:
+        call_count = 0
+
+        def side_effect(request):
+            nonlocal call_count
+            call_count += 1
+            return httpx.Response(500, json={"error": "Internal Server Error"})
+
+        with respx.mock:
+            route = respx.post("https://api.openai.com/v1/audio/transcriptions").mock(
+                side_effect=side_effect
+            )
+            with pytest.raises(APIStatusError) as exc_info:
+                await whisper_module.transcribe_audio(audio_path)
+            assert call_count == 4  # initial + 3 retries
+            assert route.call_count == 4
+            assert exc_info.value.status_code == 500
     finally:
         os.remove(audio_path)
 

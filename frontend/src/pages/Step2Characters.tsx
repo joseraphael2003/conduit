@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { SkeletonTable } from "@/components/SkeletonTable";
+import { AmberBar } from "@/components/AmberBar";
 import {
-  Spinner,
   User,
   Copy,
   Code,
@@ -197,7 +198,7 @@ export function Step2Characters() {
             )}
           >
             {extracting ? (
-              <Spinner size={16} weight="bold" className="animate-spin" />
+              <AmberBar />
             ) : (
               <User size={16} weight="regular" />
             )}
@@ -208,7 +209,7 @@ export function Step2Characters() {
 
       {/* Error Banner */}
       {error && (
-        <div className="mb-6 p-4 border border-[#EF4444] bg-[#EF4444]/10 flex items-start justify-between gap-4">
+        <div className="mb-6 p-4 border border-[#EF4444] bg-[#EF4444]/10 flex items-start justify-between gap-4" role="alert" aria-live="assertive">
           <div className="flex items-center gap-2">
             <PencilSimple size={16} weight="regular" className="text-[#EF4444] shrink-0" />
             <span className="font-body text-sm text-[#EF4444]">{error}</span>
@@ -225,11 +226,8 @@ export function Step2Characters() {
 
       {/* Extraction Loading */}
       {extracting && (
-        <div className="flex items-center justify-center h-[200px] border border-[#2A2A35] bg-[#0A0A0F]">
-          <Spinner size={32} weight="bold" className="animate-spin text-[#F0A040]" />
-          <span className="font-body text-[#8A8A9A] ml-3">
-            Extracting characters...
-          </span>
+        <div className="mb-6">
+          <SkeletonTable columns={4} />
         </div>
       )}
 
@@ -307,7 +305,7 @@ export function Step2Characters() {
               )}
             >
               {saving ? (
-                <Spinner size={16} weight="bold" className="animate-spin" />
+                <AmberBar />
               ) : (
                 <PencilSimple size={16} weight="regular" />
               )}
@@ -324,7 +322,7 @@ export function Step2Characters() {
               )}
             >
               {generatingPrompts ? (
-                <Spinner size={16} weight="bold" className="animate-spin" />
+                <AmberBar />
               ) : (
                 <Sparkle size={16} weight="regular" />
               )}
@@ -365,6 +363,8 @@ export function Step2Characters() {
                   onClick={() => toggleJson(char.name)}
                   className="flex items-center gap-1 text-[#8A8A9A] hover:text-[#E8E8F0] font-body text-xs"
                   aria-label="Toggle JSON"
+                  aria-expanded={!!showJson[char.name]}
+                  aria-controls={`json-panel-${char.name}`}
                 >
                   <Code size={16} weight="regular" />
                   JSON
@@ -372,11 +372,11 @@ export function Step2Characters() {
               </div>
 
               {showJson[char.name] ? (
-                <pre className="font-mono text-xs text-[#8A8A9A] bg-[#1A1A24] p-3 overflow-auto border border-[#2A2A35]">
+                <pre id={`json-panel-${char.name}`} className="font-mono text-xs text-[#8A8A9A] bg-[#1A1A24] p-3 overflow-auto border border-[#2A2A35]">
                   {JSON.stringify(char, null, 2)}
                 </pre>
               ) : (
-                <div className="flex flex-col gap-3">
+                <div id={`json-panel-${char.name}`} className="flex flex-col gap-3">
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <span className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A]">

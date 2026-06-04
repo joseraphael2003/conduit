@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 const mockSegments = [
   {
-    segment_number: 1,
+    segment_index: 0,
     script_line: "Welcome to the tutorial.",
     segment_prompt: "A welcoming scene with a host standing in front of a bright backdrop.",
     characters_present: ["Host"],
@@ -10,7 +10,7 @@ const mockSegments = [
     end_time: 5.2,
   },
   {
-    segment_number: 2,
+    segment_index: 1,
     script_line: "Let's begin with the basics.",
     segment_prompt: "Close-up of the host pointing at a whiteboard.",
     characters_present: ["Host"],
@@ -18,7 +18,7 @@ const mockSegments = [
     end_time: 12.8,
   },
   {
-    segment_number: 3,
+    segment_index: 2,
     script_line: "Now we move to advanced topics.",
     segment_prompt: "Split screen showing code and the host.",
     characters_present: ["Host", "Guest"],
@@ -32,14 +32,18 @@ const smallPngBase64 =
 
 const smallPngBuffer = Buffer.from(smallPngBase64, 'base64');
 
+test.describe.configure({ mode: 'serial' });
+
 test.describe('Step 4 Images Page', () => {
   const uploadedSegments = new Set<number>();
 
   test.beforeEach(async ({ page }) => {
     uploadedSegments.clear();
-    uploadedSegments.add(1);
+    uploadedSegments.add(0);
+
 
     await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+      console.log(`[ROUTE] GET /segments - returning mock segments`);
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -53,6 +57,7 @@ test.describe('Step 4 Images Page', () => {
         const url = route.request().url();
         const method = route.request().method();
         const segmentIndex = parseInt(url.split('/').pop() || '0', 10);
+        console.log(`[ROUTE] ${method} ${url} segmentIndex=${segmentIndex} uploadedSegments=${Array.from(uploadedSegments)}`);
 
         if (method === 'POST') {
           uploadedSegments.add(segmentIndex);
@@ -85,6 +90,11 @@ test.describe('Step 4 Images Page', () => {
   });
 
   test('grid has correct number of cells', async ({ page }) => {
+    const segments = await page.evaluate(() => {
+      // @ts-ignore
+      return window.segments || 'no segments';
+    });
+    console.log('Segments from page:', segments);
     const cells = page.locator('[data-testid="segment-cell"]');
     await expect(cells).toHaveCount(mockSegments.length);
   });

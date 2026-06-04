@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { Upload, Info, Image as ImageIcon, X } from "@phosphor-icons/react";
 
 interface Segment {
-  segment_number: number;
+  segment_index: number;
   script_line: string;
   segment_prompt: string;
   characters_present: string[];
@@ -21,6 +22,8 @@ export function Step4Images() {
   const [selectedSegment, setSelectedSegment] = useState<Segment | null>(null);
   const [uploadingSegment, setUploadingSegment] = useState<number | null>(null);
   const fileInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const modalRef = useFocusTrap(!!selectedSegment, () => setSelectedSegment(null), triggerRef);
 
   const apiBase = "http://localhost:8000/api/v1";
 
@@ -40,18 +43,18 @@ export function Step4Images() {
     }
   }, [uuid]);
 
-  const checkImageStatus = useCallback(async (segmentNumber: number) => {
+  const checkImageStatus = useCallback(async (segmentIndex: number) => {
     if (!uuid) return;
     try {
-      const response = await fetch(`${apiBase}/projects/${uuid}/images/${segmentNumber}`);
+      const response = await fetch(`${apiBase}/projects/${uuid}/images/${segmentIndex}`);
       setImageStatuses(prev => ({
         ...prev,
-        [segmentNumber]: response.ok
+        [segmentIndex]: response.ok
       }));
     } catch {
       setImageStatuses(prev => ({
         ...prev,
-        [segmentNumber]: false
+        [segmentIndex]: false
       }));
     }
   }, [uuid]);
@@ -63,7 +66,7 @@ export function Step4Images() {
   useEffect(() => {
     if (segments.length > 0) {
       segments.forEach(seg => {
-        checkImageStatus(seg.segment_number);
+        checkImageStatus(seg.segment_index);
       });
     }
   }, [segments, checkImageStatus]);
@@ -126,24 +129,24 @@ export function Step4Images() {
   return (
     <div className="flex flex-col gap-4">
       {error && segments.length > 0 && (
-        <div className="bg-[#EF4444]/10 border border-[#EF4444]/20 px-4 py-3 font-body text-sm text-[#EF4444]">
+        <div className="bg-[#EF4444]/10 border border-[#EF4444]/20 px-4 py-3 font-body text-sm text-[#EF4444]" role="alert" aria-live="assertive">
           {error}
         </div>
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
         {segments.map((segment) => {
-          const hasImage = imageStatuses[segment.segment_number] ?? false;
+          const hasImage = imageStatuses[segment.segment_index] ?? false;
           return (
             <div
-              key={segment.segment_number}
+              key={segment.segment_index}
               className="bg-[#1A1A24] border border-[#2A2A35] p-3 flex flex-col gap-3"
               data-testid="segment-cell"
             >
               {/* Segment Number */}
               <div className="flex items-center justify-between">
                 <span className="font-mono text-xs text-[#8A8A9A] uppercase tracking-wide">
-                  Segment {segment.segment_number}
+                  Segment {segment.segment_index}
                 </span>
               </div>
 
@@ -151,8 +154,8 @@ export function Step4Images() {
               <div className="relative w-full aspect-video bg-[#2A2A35] border border-[#2A2A35] overflow-hidden">
                 {hasImage ? (
                   <img
-                    src={`${apiBase}/projects/${uuid}/images/${segment.segment_number}`}
-                    alt={`Segment ${segment.segment_number}`}
+                    src={`${apiBase}/projects/${uuid}/images/${segment.segment_index}`}
+                    alt={`Segment ${segment.segment_index}`}
                     className="w-full h-full object-cover"
                     data-testid="segment-thumbnail"
                   />
@@ -168,10 +171,10 @@ export function Step4Images() {
                 type="file"
                 accept="image/png"
                 className="hidden"
-                ref={(el) => { fileInputRefs.current[segment.segment_number] = el; }}
+                ref={(el) => { fileInputRefs.current[segment.segment_index] = el; }}
                 onChange={(e) => {
                   const file = e.target.files?.[0] ?? null;
-                  handleFileChange(segment.segment_number, file).catch(() => {});
+                  handleFileChange(segment.segment_index, file).catch(() => {});
                   e.target.value = "";
                 }}
               />
@@ -179,8 +182,8 @@ export function Step4Images() {
               {/* Buttons */}
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => handleUploadClick(segment.segment_number)}
-                  disabled={uploadingSegment === segment.segment_number}
+                  onClick={() => handleUploadClick(segment.segment_index)}
+                  disabled={uploadingSegment === segment.segment_index}
                   className={cn(
                     "flex items-center gap-1.5 flex-1 justify-center px-3 py-2 font-body text-xs font-semibold tracking-wide uppercase",
                     "bg-[#F0A040] text-[#0F0F14] hover:bg-[#F5B860]",
@@ -189,10 +192,13 @@ export function Step4Images() {
                   data-testid="upload-button"
                 >
                   <Upload size={14} weight="regular" />
-                  {uploadingSegment === segment.segment_number ? "Uploading..." : "Upload"}
+                  {uploadingSegment === segment.segment_index ? "Uploading..." : "Upload"}
                 </button>
                 <button
-                  onClick={() => setSelectedSegment(segment)}
+                  onClick={() => {
+                    triggerRef.current = document.activeElement as HTMLButtonElement;
+                    setSelectedSegment(segment);
+                  }}
                   className={cn(
                     "flex items-center gap-1.5 flex-1 justify-center px-3 py-2 font-body text-xs font-semibold tracking-wide uppercase",
                     "bg-[#1E1E28] text-[#06B6D4] border border-[#2A2A35] hover:bg-[#2A2A35]"
@@ -211,9 +217,12 @@ export function Step4Images() {
       {/* Details Modal */}
       {selectedSegment && (
         <div
+          ref={modalRef}
           className="fixed inset-0 bg-[#0F0F14]/80 flex items-center justify-center z-50 p-4"
           onClick={() => setSelectedSegment(null)}
           data-testid="details-modal"
+          role="dialog"
+          aria-modal="true"
         >
           <div
             className="bg-[#1A1A24] border border-[#2A2A35] w-full max-w-[520px] flex flex-col"
@@ -222,11 +231,11 @@ export function Step4Images() {
             {/* Modal Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-[#2A2A35]">
               <h2 className="font-headline text-xl text-[#E8E8F0]">
-                Segment {selectedSegment.segment_number}
+                Segment {selectedSegment.segment_index}
               </h2>
               <button
                 onClick={() => setSelectedSegment(null)}
-                className="flex items-center justify-center w-8 h-8 text-[#8A8A9A] hover:text-[#E8E8F0] hover:bg-[#1E1E28]"
+                className="flex items-center justify-center w-8 h-8 bg-transparent text-[#8A8A9A] hover:text-[#E8E8F0] hover:bg-[#1A1A24]"
                 aria-label="Close details"
               >
                 <X size={18} weight="regular" />

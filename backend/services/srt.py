@@ -8,6 +8,8 @@ from typing import List
 import srt
 from srt import timedelta
 
+PROJECTS_BASE_DIR = os.path.join("..", "projects")
+
 
 def _split_into_sentences(words: List[dict]) -> List[dict]:
     """Group words into sentences at punctuation boundaries (. ? !)."""
@@ -124,13 +126,16 @@ def save_transcription_files(
       - words.json
       - captions.srt
       - transcript_raw.txt
+      - .conduit/source_of_truth_script.txt
     """
-    project_dir = os.path.join("projects", uuid)
+    project_dir = os.path.join(PROJECTS_BASE_DIR, uuid)
     os.makedirs(project_dir, exist_ok=True)
 
+    # Save words.json with a "words" key (expected by downstream steps)
+    words_data = {"words": words}
     words_path = os.path.join(project_dir, "words.json")
     with open(words_path, "w", encoding="utf-8") as f:
-        json.dump(words, f, indent=2)
+        json.dump(words_data, f, indent=2)
 
     srt_path = os.path.join(project_dir, "captions.srt")
     with open(srt_path, "w", encoding="utf-8") as f:
@@ -139,3 +144,14 @@ def save_transcription_files(
     transcript_path = os.path.join(project_dir, "transcript_raw.txt")
     with open(transcript_path, "w", encoding="utf-8") as f:
         f.write(transcript)
+
+    # Save source of truth script and words for downstream steps
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    os.makedirs(conduit_dir, exist_ok=True)
+    script_path = os.path.join(conduit_dir, "source_of_truth_script.txt")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write(transcript)
+
+    words_conduit_path = os.path.join(conduit_dir, "words.json")
+    with open(words_conduit_path, "w", encoding="utf-8") as f:
+        json.dump(words_data, f, indent=2)

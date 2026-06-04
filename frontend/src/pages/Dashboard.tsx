@@ -168,11 +168,11 @@ export function Dashboard() {
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
+                    <button
                     onClick={() => handleOpen(project.uuid)}
                     className={cn(
                       "flex items-center gap-1.5 px-3 py-2 font-body text-sm font-medium",
-                      "text-[#06B6D4] hover:bg-[#1E1E28]"
+                      "bg-transparent text-[#06B6D4] hover:bg-[#1A1A24]"
                     )}
                   >
                     Open
@@ -182,7 +182,7 @@ export function Dashboard() {
                     onClick={() => handleDelete(project.uuid)}
                     className={cn(
                       "flex items-center gap-1.5 px-3 py-2 font-body text-sm font-medium",
-                      "text-[#EF4444] hover:bg-[#1E1E28]"
+                      "bg-transparent text-[#EF4444] hover:bg-[#1A1A24]"
                     )}
                   >
                     <Trash size={14} weight="regular" />

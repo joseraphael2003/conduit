@@ -8,6 +8,8 @@ from models.database import get_db
 from models.state import ProjectState
 from services.state import update_state, invalidate_downstream, get_state, STATE_ORDER, get_state_index
 from services.whisper import transcribe_audio
+from services.chunking import chunk_audio
+from services.srt import generate_srt, save_transcription_files
 
 projects_router = APIRouter()
 
@@ -231,9 +233,69 @@ async def upload_voiceover(project_uuid: str, file: UploadFile = File(...)):
         content = await file.read()
         f.write(content)
 
+    # Transcription pipeline
+    file_size = os.path.getsize(voiceover_path)
+    if file_size > 25_000_000:
+        chunk_paths = chunk_audio(voiceover_path)
+        all_words = []
+        for chunk_path in chunk_paths:
+            result = await transcribe_audio(chunk_path)
+            all_words.extend(result.get("words", []))
+        words = all_words
+    else:
+        result = await transcribe_audio(voiceover_path)
+        words = result.get("words", [])
+
+    # Generate SRT
+    srt_content = generate_srt(words)
+
+    # Build transcript text
+    transcript_text = " ".join(w.get("word", "") for w in words)
+
+    # Save transcript.json
+    transcript_data = {
+        "transcript": transcript_text,
+        "word_count": len(words),
+        "words": words,
+    }
+    transcript_path = os.path.join(project_dir, "transcript.json")
+    with open(transcript_path, "w", encoding="utf-8") as f:
+        json.dump(transcript_data, f, indent=2)
+
+    # Save other transcription files
+    save_transcription_files(project_uuid, words, srt_content, transcript_text)
+
+    # Update state to step_1_complete
+    current_state = await get_state(project_uuid)
+    current_idx = get_state_index(current_state)
+    target_idx = get_state_index(ProjectState.STEP_1_COMPLETE)
+
+    if current_idx >= target_idx:
+        await invalidate_downstream(project_uuid, 1)
+
+    await update_state(project_uuid, ProjectState.STEP_1_COMPLETE)
+
     return {
         "processing": True,
         "message": "Audio uploaded. Transcription in progress.",
+    }
+
+
+@projects_router.get("/projects/{project_uuid}/transcript")
+async def get_project_transcript(project_uuid: str):
+    """Get the transcript for a project."""
+    project_dir = os.path.join(PROJECTS_BASE_DIR, project_uuid)
+    transcript_path = os.path.join(project_dir, "transcript.json")
+    if not os.path.exists(transcript_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Transcript not found",
+        )
+    with open(transcript_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return {
+        "transcript": data["transcript"],
+        "word_count": data["word_count"],
     }
 
 
