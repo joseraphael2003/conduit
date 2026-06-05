@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { AmberBar } from "@/components/AmberBar";
 import {
@@ -14,116 +13,8 @@ import {
   Article,
   GitDiff,
 } from "@phosphor-icons/react";
-
-interface TranscriptResponse {
-  transcript: string;
-  word_count: number;
-}
-
-interface DiffBlock {
-  type: "equal" | "delete" | "insert" | "change";
-  oldWords: string[];
-  newWords: string[];
-}
-
-function longestCommonSubsequence<T>(a: T[], b: T[]): T[] {
-  const m = a.length;
-  const n = b.length;
-  const dp: number[][] = Array(m + 1)
-    .fill(0)
-    .map(() => Array(n + 1).fill(0));
-
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (a[i - 1] === b[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-      }
-    }
-  }
-
-  const lcs: T[] = [];
-  let i = m;
-  let j = n;
-  while (i > 0 && j > 0) {
-    if (a[i - 1] === b[j - 1]) {
-      lcs.unshift(a[i - 1]);
-      i--;
-      j--;
-    } else if (dp[i - 1][j] > dp[i][j - 1]) {
-      i--;
-    } else {
-      j--;
-    }
-  }
-
-  return lcs;
-}
-
-function computeDiff(oldText: string, newText: string): DiffBlock[] {
-  if (!oldText && !newText) return [];
-  if (!oldText) return [{ type: "insert", oldWords: [], newWords: newText.split(/\s+/) }];
-  if (!newText) return [{ type: "delete", oldWords: oldText.split(/\s+/), newWords: [] }];
-
-  const oldWords = oldText.split(/(\s+)/).filter((w) => w.length > 0);
-  const newWords = newText.split(/(\s+)/).filter((w) => w.length > 0);
-
-  const lcs = longestCommonSubsequence(oldWords, newWords);
-
-  const blocks: DiffBlock[] = [];
-  let oldIdx = 0;
-  let newIdx = 0;
-  let lcsIdx = 0;
-
-  while (oldIdx < oldWords.length || newIdx < newWords.length) {
-    if (
-      lcsIdx < lcs.length &&
-      oldIdx < oldWords.length &&
-      newIdx < newWords.length &&
-      oldWords[oldIdx] === lcs[lcsIdx] &&
-      newWords[newIdx] === lcs[lcsIdx]
-    ) {
-      const equalWords: string[] = [];
-      while (
-        lcsIdx < lcs.length &&
-        oldIdx < oldWords.length &&
-        newIdx < newWords.length &&
-        oldWords[oldIdx] === lcs[lcsIdx] &&
-        newWords[newIdx] === lcs[lcsIdx]
-      ) {
-        equalWords.push(lcs[lcsIdx]);
-        oldIdx++;
-        newIdx++;
-        lcsIdx++;
-      }
-      blocks.push({ type: "equal", oldWords: equalWords, newWords: equalWords });
-    } else {
-      const oldRun: string[] = [];
-      const newRun: string[] = [];
-
-      while (oldIdx < oldWords.length && !(lcsIdx < lcs.length && oldWords[oldIdx] === lcs[lcsIdx])) {
-        oldRun.push(oldWords[oldIdx]);
-        oldIdx++;
-      }
-
-      while (newIdx < newWords.length && !(lcsIdx < lcs.length && newWords[newIdx] === lcs[lcsIdx])) {
-        newRun.push(newWords[newIdx]);
-        newIdx++;
-      }
-
-      if (oldRun.length > 0 && newRun.length > 0) {
-        blocks.push({ type: "change", oldWords: oldRun, newWords: newRun });
-      } else if (oldRun.length > 0) {
-        blocks.push({ type: "delete", oldWords: oldRun, newWords: [] });
-      } else if (newRun.length > 0) {
-        blocks.push({ type: "insert", oldWords: [], newWords: newRun });
-      }
-    }
-  }
-
-  return blocks;
-}
+import { useDiff } from "@/hooks/useDiff";
+import { useTranscript } from "@/hooks/useTranscript";
 
 function isValidAudioFile(file: File): boolean {
   const validTypes = [
@@ -145,91 +36,24 @@ interface Step1ScriptProps {
 }
 
 export function Step1Script({ onStep1Ready }: Step1ScriptProps) {
-  const { uuid } = useParams<{ uuid: string }>();
-  const [transcript, setTranscript] = useState<string>("");
   const [script, setScript] = useState<string>("");
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [showScript, setShowScript] = useState(false);
   const [approvedChanges, setApprovedChanges] = useState<Set<number>>(new Set());
   const [rejectedChanges, setRejectedChanges] = useState<Set<number>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropzoneRef = useRef<HTMLDivElement>(null);
 
-  const apiBase = "http://localhost:8000/api/v1";
-
-  const fetchTranscript = useCallback(async () => {
-    if (!uuid) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(`${apiBase}/projects/${uuid}/transcript`);
-      if (!response.ok) {
-        if (response.status === 404) {
-          setTranscript("");
-          return;
-        }
-        throw new Error(`Failed to fetch transcript: ${response.status}`);
-      }
-      const data = (await response.json()) as TranscriptResponse;
-      setTranscript(data.transcript || "");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }, [uuid]);
-
-  useEffect(() => {
-    fetchTranscript();
-  }, [fetchTranscript]);
-
-
-
-  const handleUpload = (file: File) => {
-    if (!uuid) return;
-    setUploading(true);
-    setUploadProgress(0);
-    setError(null);
-
-    const xhr = new XMLHttpRequest();
-    const formData = new FormData();
-    formData.append("file", file);
-
-    xhr.upload.addEventListener("progress", (event) => {
-      if (event.lengthComputable) {
-        setUploadProgress(Math.round((event.loaded / event.total) * 100));
-      }
-    });
-
-    xhr.addEventListener("load", () => {
-      setUploading(false);
-      if (xhr.status >= 200 && xhr.status < 300) {
-        setUploadProgress(100);
-        fetchTranscript();
-      } else {
-        setUploadProgress(0);
-        setError(`Upload failed: ${xhr.status}`);
-      }
-    });
-
-    xhr.addEventListener("error", () => {
-      setUploading(false);
-      setUploadProgress(0);
-      setError("Upload failed");
-    });
-
-    xhr.addEventListener("abort", () => {
-      setUploading(false);
-      setUploadProgress(0);
-      setError("Upload aborted");
-    });
-
-    xhr.open("POST", `${apiBase}/projects/${uuid}/voiceover`);
-    xhr.send(formData);
-  };
+  const { computeDiff } = useDiff();
+  const {
+    transcript,
+    fetchTranscript,
+    handleUpload,
+    loading,
+    error,
+    setError,
+    uploading,
+    uploadProgress,
+  } = useTranscript();
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();

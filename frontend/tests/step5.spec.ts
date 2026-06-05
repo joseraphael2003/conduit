@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { apiBase } from "../src/config";
 
 const mockSegments = [
   {
@@ -39,7 +40,7 @@ async function injectStyles(page: any) {
 
 test.describe('Step 5 — Video Generation', () => {
   test.beforeEach(async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+    await page.route(apiBase + '/projects/**/state', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -47,7 +48,7 @@ test.describe('Step 5 — Video Generation', () => {
       });
     });
 
-    await page.route('http://localhost:8000/api/v1/projects/**/segments', async route => {
+    await page.route(apiBase + '/projects/**/segments', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -56,7 +57,7 @@ test.describe('Step 5 — Video Generation', () => {
     });
 
     await page.route(
-      'http://localhost:8000/api/v1/projects/**/images/**',
+      apiBase + '/projects/**/images/**',
       async route => {
         await route.fulfill({
           status: 404,
@@ -66,7 +67,7 @@ test.describe('Step 5 — Video Generation', () => {
       }
     );
 
-    await page.route('http://localhost:8000/api/v1/projects/**/video/srt', async route => {
+    await page.route(apiBase + '/projects/**/video/srt', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/octet-stream',
@@ -93,7 +94,7 @@ test.describe('Step 5 — Video Generation', () => {
   test('Randomize button works', async ({ page }) => {
     const putEffects: { index: number; effect: string }[] = [];
 
-    await page.route('http://localhost:8000/api/v1/projects/**/segments/**/effect', async route => {
+    await page.route(apiBase + '/projects/**/segments/**/effect', async route => {
       const url = route.request().url();
       const index = parseInt(url.split('/').slice(-2)[0], 10);
       const body = await route.request().postDataJSON();
@@ -146,7 +147,7 @@ test.describe('Step 5 — Video Generation', () => {
 
   test('Generate Video button is enabled when all images are present', async ({ page }) => {
     await page.route(
-      'http://localhost:8000/api/v1/projects/**/images/**',
+      apiBase + '/projects/**/images/**',
       async route => {
         await route.fulfill({
           status: 200,
@@ -170,7 +171,7 @@ test.describe('Step 5 — Video Generation', () => {
 
   test('progress bar appears during generation', async ({ page }) => {
     await page.route(
-      'http://localhost:8000/api/v1/projects/**/images/**',
+      apiBase + '/projects/**/images/**',
       async route => {
         await route.fulfill({
           status: 200,
@@ -184,7 +185,7 @@ test.describe('Step 5 — Video Generation', () => {
     );
 
     // Delay the generate endpoint so we can catch the progress bar
-    await page.route('http://localhost:8000/api/v1/projects/**/video/generate', async route => {
+    await page.route(apiBase + '/projects/**/video/generate', async route => {
       await new Promise(resolve => setTimeout(resolve, 800));
       await route.fulfill({
         status: 200,
@@ -213,7 +214,7 @@ test.describe('Step 5 — Video Generation', () => {
 
   test('download button appears after generation', async ({ page }) => {
     await page.route(
-      'http://localhost:8000/api/v1/projects/**/images/**',
+      apiBase + '/projects/**/images/**',
       async route => {
         await route.fulfill({
           status: 200,
@@ -226,7 +227,7 @@ test.describe('Step 5 — Video Generation', () => {
       }
     );
 
-    await page.route('http://localhost:8000/api/v1/projects/**/video/generate', async route => {
+    await page.route(apiBase + '/projects/**/video/generate', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -249,7 +250,7 @@ test.describe('Step 5 — Video Generation', () => {
 
   test('console output panel is visible after generation', async ({ page }) => {
     await page.route(
-      'http://localhost:8000/api/v1/projects/**/images/**',
+      apiBase + '/projects/**/images/**',
       async route => {
         await route.fulfill({
           status: 200,
@@ -262,7 +263,7 @@ test.describe('Step 5 — Video Generation', () => {
       }
     );
 
-    await page.route('http://localhost:8000/api/v1/projects/**/video/generate', async route => {
+    await page.route(apiBase + '/projects/**/video/generate', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -289,7 +290,7 @@ test.describe('Step 5 — Video Generation', () => {
 
   test('error banner shows on generation failure', async ({ page }) => {
     await page.route(
-      'http://localhost:8000/api/v1/projects/**/images/**',
+      apiBase + '/projects/**/images/**',
       async route => {
         await route.fulfill({
           status: 200,
@@ -302,7 +303,7 @@ test.describe('Step 5 — Video Generation', () => {
       }
     );
 
-    await page.route('http://localhost:8000/api/v1/projects/**/video/generate', async route => {
+    await page.route(apiBase + '/projects/**/video/generate', async route => {
       await route.fulfill({
         status: 500,
         contentType: 'application/json',

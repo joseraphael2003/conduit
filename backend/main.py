@@ -4,6 +4,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from dotenv import load_dotenv
 import os
+import logging
 
 # Load .env file if present
 load_dotenv()
@@ -11,6 +12,7 @@ load_dotenv()
 from routers import router
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
 
 # CORS middleware
 app.add_middleware(
@@ -26,9 +28,10 @@ app.include_router(router)
 # Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"error": str(exc), "status_code": 500},
+        content={"error": "An unexpected error occurred. Please try again later."},
     )
 
 # Startup validation

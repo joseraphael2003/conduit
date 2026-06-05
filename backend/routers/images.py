@@ -5,10 +5,9 @@ from io import BytesIO
 from fastapi import APIRouter, HTTPException, status, UploadFile, File
 from fastapi.responses import FileResponse
 from PIL import Image
+from config import PROJECTS_BASE_DIR
 
 images_router = APIRouter()
-
-PROJECTS_BASE_DIR = os.path.join("..", "projects")
 
 logger = logging.getLogger(__name__)
 

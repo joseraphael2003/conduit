@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { apiBase } from "../src/config";
 
 test.describe('Step 3 - Segments', () => {
   async function injectStyles(page: any) {
@@ -24,7 +25,7 @@ test.describe('Step 3 - Segments', () => {
   });
 
   test('segment table has correct number of rows after breakdown', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       await route.fulfill({
         status: 404,
         contentType: 'application/json',
@@ -32,7 +33,7 @@ test.describe('Step 3 - Segments', () => {
       });
     });
 
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments/breakdown', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments/breakdown', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -55,7 +56,7 @@ test.describe('Step 3 - Segments', () => {
   });
 
   test('segment prompts are editable', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       await route.fulfill({
         status: 404,
         contentType: 'application/json',
@@ -63,7 +64,7 @@ test.describe('Step 3 - Segments', () => {
       });
     });
 
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments/breakdown', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments/breakdown', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -75,7 +76,7 @@ test.describe('Step 3 - Segments', () => {
       });
     });
 
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
     });
 
@@ -91,7 +92,7 @@ test.describe('Step 3 - Segments', () => {
   });
 
   test('Split and Merge buttons are present', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       await route.fulfill({
         status: 404,
         contentType: 'application/json',
@@ -99,7 +100,7 @@ test.describe('Step 3 - Segments', () => {
       });
     });
 
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments/breakdown', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments/breakdown', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -124,7 +125,7 @@ test.describe('Step 3 - Segments', () => {
   });
 
   test('error banner shows retry button on API failure', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       await route.fulfill({
         status: 404,
         contentType: 'application/json',
@@ -132,7 +133,7 @@ test.describe('Step 3 - Segments', () => {
       });
     });
 
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments/breakdown', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments/breakdown', async route => {
       await route.fulfill({
         status: 500,
         contentType: 'application/json',
@@ -149,7 +150,7 @@ test.describe('Step 3 - Segments', () => {
   });
 
   test('Generate Prompts button appears after breakdown', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       await route.fulfill({
         status: 404,
         contentType: 'application/json',
@@ -157,7 +158,7 @@ test.describe('Step 3 - Segments', () => {
       });
     });
 
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments/breakdown', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments/breakdown', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

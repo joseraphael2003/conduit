@@ -4,11 +4,11 @@ import { existsSync, readFileSync, readdirSync, statSync, mkdirSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
+import { apiBase } from "../src/config";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const API_BASE = 'http://localhost:8000/api/v1';
 
 function isBackendRunning(): boolean {
   try {
@@ -106,7 +106,7 @@ test.describe('E2E Happy Path — Full 5-Step Wizard', () => {
     await expect(page.locator('[data-testid="transcript-display"]')).toBeVisible();
 
     // Verify state is step_1_complete
-    const stateResp = await fetch(`${API_BASE}/projects/${projectUuid}/state`);
+    const stateResp = await fetch(`${apiBase}/projects/${projectUuid}/state`);
     const stateData = await stateResp.json();
     expect(stateData.state).toBe('step_1_complete');
 
@@ -138,7 +138,7 @@ test.describe('E2E Happy Path — Full 5-Step Wizard', () => {
     await expect(page.locator('button[aria-label^="Copy front profile prompt"]')).toHaveCount(1);
 
     // Verify state is step_2_complete
-    const stateResp = await fetch(`${API_BASE}/projects/${projectUuid}/state`);
+    const stateResp = await fetch(`${apiBase}/projects/${projectUuid}/state`);
     const stateData = await stateResp.json();
     expect(stateData.state).toBe('step_2_complete');
 
@@ -162,7 +162,7 @@ test.describe('E2E Happy Path — Full 5-Step Wizard', () => {
     await page.waitForTimeout(1000);
 
     // Verify state is step_3_complete
-    const stateResp = await fetch(`${API_BASE}/projects/${projectUuid}/state`);
+    const stateResp = await fetch(`${apiBase}/projects/${projectUuid}/state`);
     const stateData = await stateResp.json();
     expect(stateData.state).toBe('step_3_complete');
 
@@ -195,7 +195,7 @@ test.describe('E2E Happy Path — Full 5-Step Wizard', () => {
     await expect(thumbnails).toHaveCount(2);
 
     // Advance state to step_4_complete so video generation can proceed
-    const advanceResp = await fetch(`${API_BASE}/projects/${projectUuid}/step/4`, {
+    const advanceResp = await fetch(`${apiBase}/projects/${projectUuid}/step/4`, {
       method: 'PUT',
     });
     expect(advanceResp.status).toBe(200);
@@ -221,7 +221,7 @@ test.describe('E2E Happy Path — Full 5-Step Wizard', () => {
     await page.waitForSelector('[data-testid="download-video-button"]', { timeout: 15000 });
 
     // Verify state is step_5_complete
-    const stateResp = await fetch(`${API_BASE}/projects/${projectUuid}/state`);
+    const stateResp = await fetch(`${apiBase}/projects/${projectUuid}/state`);
     const stateData = await stateResp.json();
     expect(stateData.state).toBe('step_5_complete');
 

@@ -10,10 +10,9 @@ from pydantic import BaseModel
 from services.ffmpeg import generate_video
 from services.state import update_state
 from models.state import ProjectState
+from config import PROJECTS_BASE_DIR
 
 video_router = APIRouter()
-
-PROJECTS_BASE_DIR = os.path.join("..", "projects")
 
 
 def _get_project_dir(project_uuid: str) -> str:

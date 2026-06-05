@@ -12,6 +12,7 @@ import {
   ArrowClockwise,
   Check,
 } from "@phosphor-icons/react";
+import { apiBase } from "@/config";
 
 interface Segment {
   segment_index: number;
@@ -38,7 +39,7 @@ export function Step3Segments() {
     if (!uuid) return;
     try {
       const response = await fetch(
-        `http://localhost:8000/api/v1/projects/${uuid}/segments`
+        `${apiBase}/projects/${uuid}/segments`
       );
       if (!response.ok) {
         if (response.status === 404) {
@@ -57,7 +58,9 @@ export function Step3Segments() {
   }, [uuid]);
 
   useEffect(() => {
-    loadSegments();
+    loadSegments().catch((err) => {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    });
   }, [loadSegments]);
 
   const handleBreakdown = async () => {
@@ -66,7 +69,7 @@ export function Step3Segments() {
     setError(null);
     try {
       const response = await fetch(
-        `http://localhost:8000/api/v1/projects/${uuid}/segments/breakdown`,
+        `${apiBase}/projects/${uuid}/segments/breakdown`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -91,7 +94,7 @@ export function Step3Segments() {
     setError(null);
     try {
       const response = await fetch(
-        `http://localhost:8000/api/v1/projects/${uuid}/segments/prompts`,
+        `${apiBase}/projects/${uuid}/segments/prompts`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -127,7 +130,7 @@ export function Step3Segments() {
     try {
       // Fetch full segment list from server
       const getResponse = await fetch(
-        `http://localhost:8000/api/v1/projects/${uuid}/segments`
+        `${apiBase}/projects/${uuid}/segments`
       );
       if (!getResponse.ok) {
         throw new Error(`Fetch failed: ${getResponse.status}`);
@@ -144,7 +147,7 @@ export function Step3Segments() {
 
       // PUT complete list
       const response = await fetch(
-        `http://localhost:8000/api/v1/projects/${uuid}/segments`,
+        `${apiBase}/projects/${uuid}/segments`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -183,7 +186,7 @@ export function Step3Segments() {
     setError(null);
     try {
       const response = await fetch(
-        `http://localhost:8000/api/v1/projects/${uuid}/segments/${segmentIndex}/split`,
+        `${apiBase}/projects/${uuid}/segments/${segmentIndex}/split`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -213,7 +216,7 @@ export function Step3Segments() {
     setError(null);
     try {
       const response = await fetch(
-        `http://localhost:8000/api/v1/projects/${uuid}/segments/${segmentIndex}/merge`,
+        `${apiBase}/projects/${uuid}/segments/${segmentIndex}/merge`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

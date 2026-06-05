@@ -4,8 +4,7 @@ from datetime import datetime
 from fastapi import HTTPException, status
 from models.database import get_db
 from models.state import ProjectState
-
-PROJECTS_BASE_DIR = os.path.join("..", "projects")
+from config import PROJECTS_BASE_DIR
 
 STATE_ORDER = [
     ProjectState.CREATED,

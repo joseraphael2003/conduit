@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { ErrorBoundary, type FallbackProps } from "react-error-boundary";
 import { cn } from "@/lib/utils";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { Stepper } from "./Stepper";
@@ -9,6 +10,7 @@ import { Step2Characters } from "@/pages/Step2Characters";
 import { Step3Segments } from "@/pages/Step3Segments";
 import { Step4Images } from "@/pages/Step4Images";
 import { Step5Video } from "@/pages/Step5Video";
+import { apiBase } from "@/config";
 
 interface WizardShellProps {
   children?: React.ReactNode;
@@ -18,7 +20,31 @@ interface ProjectState {
   state: string;
 }
 
-const apiBase = "http://localhost:8000/api/v1";
+
+
+function fallbackRender({ error, resetErrorBoundary }: FallbackProps) {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    <div
+      className="flex flex-col items-center justify-center h-full gap-4 bg-[#0F0F14] p-4"
+      data-testid="error-boundary"
+    >
+      <h2 className="font-headline text-2xl text-[#F0A040]">Something went wrong</h2>
+      <p className="font-body text-sm text-[#E8E8F0] max-w-[640px] text-center">
+        {message}
+      </p>
+      <button
+        onClick={resetErrorBoundary}
+        className={cn(
+          "flex items-center gap-2 px-6 py-2.5 font-body text-sm font-semibold tracking-wide uppercase",
+          "bg-[#F0A040] text-[#0F0F14] hover:bg-[#F5B860]"
+        )}
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
 
 export function WizardShell({ children }: WizardShellProps) {
   const { uuid, stepNumber } = useParams();
@@ -46,9 +72,10 @@ export function WizardShell({ children }: WizardShellProps) {
 
   useEffect(() => {
     if (!uuid) return;
-    const fetchProjectState = async () => {
+    const controller = new AbortController();
+    const fetchProjectState = async (signal: AbortSignal) => {
       try {
-        const response = await fetch(`${apiBase}/projects/${uuid}/state`);
+        const response = await fetch(`${apiBase}/projects/${uuid}/state`, { signal });
         if (!response.ok) return;
         const data = (await response.json()) as ProjectState;
         setProjectState(data);
@@ -56,7 +83,8 @@ export function WizardShell({ children }: WizardShellProps) {
         // silent fail on initial load
       }
     };
-    fetchProjectState();
+    fetchProjectState(controller.signal);
+    return () => controller.abort();
   }, [uuid]);
 
   const isStepComplete = (step: number): boolean => {
@@ -149,12 +177,14 @@ export function WizardShell({ children }: WizardShellProps) {
 
       {/* Stepper Bar */}
       <nav className="stepper h-[56px] bg-[#0A0A0F] border-b border-[#2A2A35] shrink-0 flex items-center justify-between px-8" aria-label="Wizard steps">
-        <Stepper currentStep={currentStep} onStepClick={(step) => goToStep(step)} />
+        <Stepper currentStep={currentStep} projectState={projectState} onStepClick={(step) => goToStep(step)} />
       </nav>
 
       {/* Main Content Area */}
       <main className="content flex-1 overflow-y-auto bg-[#0F0F14] p-4">
-        {renderStepContent()}
+        <ErrorBoundary fallbackRender={fallbackRender}>
+          {renderStepContent()}
+        </ErrorBoundary>
       </main>
 
       {/* Action Bar */}

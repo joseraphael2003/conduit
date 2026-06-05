@@ -5,6 +5,9 @@ DB_PATH = os.path.join("..", "projects", "conduit.db")
 
 async def get_db() -> aiosqlite.Connection:
     """Return an async aiosqlite connection with WAL mode enabled."""
+    # check_same_thread=False is required because aiosqlite manages its own
+    # thread pool internally. Each call creates a new connection, and SQLite
+    # WAL mode handles concurrency safely.
     conn = await aiosqlite.connect(DB_PATH, check_same_thread=False)
     await conn.execute("PRAGMA journal_mode=WAL")
     return conn

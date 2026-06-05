@@ -7,13 +7,8 @@ import httpx
 # Must set OPENAI_API_KEY before importing anything that uses it
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 
-# Patch database path before any imports that use it
+# Import database module before app
 import models.database
-
-_original_db_path = models.database.DB_PATH
-
-test_db_path = os.path.join(tempfile.gettempdir(), "test_conduit.db")
-models.database.DB_PATH = test_db_path
 
 # Now import app
 from main import app
@@ -45,14 +40,20 @@ async def temp_projects_dir():
 @pytest_asyncio.fixture
 async def test_db(temp_projects_dir):
     """Initialize test database and clean it up after."""
-    # Remove old test db if it exists
-    if os.path.exists(models.database.DB_PATH):
-        os.remove(models.database.DB_PATH)
+    fd, test_db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    # Remove empty file created by mkstemp so init_db creates a fresh DB
+    if os.path.exists(test_db_path):
+        os.remove(test_db_path)
+    # Patch DB_PATH to the isolated temp path
+    original_db_path = models.database.DB_PATH
+    models.database.DB_PATH = test_db_path
     await models.database.init_db()
-    yield models.database.DB_PATH
+    yield test_db_path
     # Cleanup
-    if os.path.exists(models.database.DB_PATH):
-        os.remove(models.database.DB_PATH)
+    models.database.DB_PATH = original_db_path
+    if os.path.exists(test_db_path):
+        os.remove(test_db_path)
 
 
 @pytest_asyncio.fixture

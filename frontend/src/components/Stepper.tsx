@@ -1,5 +1,3 @@
-import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import {
   FileText,
@@ -9,13 +7,15 @@ import {
   FilmStrip,
 } from "@phosphor-icons/react";
 
-interface StepperProps {
-  currentStep: number;
-  onStepClick: (step: number) => void;
-}
 
 interface ProjectState {
   state: string;
+}
+
+interface StepperProps {
+  currentStep: number;
+  projectState: ProjectState | null;
+  onStepClick: (step: number) => void;
 }
 
 const steps = [
@@ -26,26 +26,7 @@ const steps = [
   { label: "Video", icon: FilmStrip },
 ];
 
-const apiBase = "http://localhost:8000/api/v1";
-
-export function Stepper({ currentStep, onStepClick }: StepperProps) {
-  const { uuid } = useParams();
-  const [projectState, setProjectState] = useState<ProjectState | null>(null);
-
-  useEffect(() => {
-    if (!uuid) return;
-    const fetchProjectState = async () => {
-      try {
-        const response = await fetch(`${apiBase}/projects/${uuid}/state`);
-        if (!response.ok) return;
-        const data = await response.json() as ProjectState;
-        setProjectState(data);
-      } catch {
-        // silent fail on initial load
-      }
-    };
-    fetchProjectState();
-  }, [uuid]);
+export function Stepper({ currentStep, projectState, onStepClick }: StepperProps) {
 
   const isStepComplete = (step: number): boolean => {
     if (!projectState) return false;

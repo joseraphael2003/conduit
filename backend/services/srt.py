@@ -7,8 +7,7 @@ from typing import List
 
 import srt
 from srt import timedelta
-
-PROJECTS_BASE_DIR = os.path.join("..", "projects")
+from config import PROJECTS_BASE_DIR
 
 
 def _split_into_sentences(words: List[dict]) -> List[dict]:

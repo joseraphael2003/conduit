@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 import uuid as uuid_module
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, status, Response, UploadFile, File
@@ -10,10 +11,9 @@ from services.state import update_state, invalidate_downstream, get_state, STATE
 from services.whisper import transcribe_audio
 from services.chunking import chunk_audio
 from services.srt import generate_srt, save_transcription_files
+from config import PROJECTS_BASE_DIR
 
 projects_router = APIRouter()
-
-PROJECTS_BASE_DIR = os.path.join("..", "projects")
 
 
 def create_project_directory(project_uuid: str) -> None:
@@ -230,8 +230,7 @@ async def upload_voiceover(project_uuid: str, file: UploadFile = File(...)):
     # Save uploaded file
     voiceover_path = os.path.join(project_dir, f"voiceover{file_ext}")
     with open(voiceover_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
+        shutil.copyfileobj(file.file, f)
 
     # Transcription pipeline
     file_size = os.path.getsize(voiceover_path)

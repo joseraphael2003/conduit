@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Trash, ArrowRight } from "@phosphor-icons/react";
+import { apiBase } from "@/config";
 
 interface Project {
   uuid: string;
@@ -45,7 +46,7 @@ export function Dashboard() {
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const response = await fetch("http://localhost:8000/api/v1/projects");
+        const response = await fetch(apiBase + "/projects");
         if (!response.ok) {
           throw new Error(`Failed to fetch projects: ${response.status}`);
         }
@@ -65,7 +66,7 @@ export function Dashboard() {
     const name = window.prompt("Enter project name:");
     if (!name || name.trim() === "") return;
     try {
-      const response = await fetch("http://localhost:8000/api/v1/projects", {
+      const response = await fetch(apiBase + "/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim() }),
@@ -83,7 +84,7 @@ export function Dashboard() {
   const handleDelete = async (uuid: string) => {
     if (!window.confirm("Are you sure you want to delete this project?")) return;
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/projects/${uuid}`, {
+      const response = await fetch(`${apiBase}/projects/${uuid}`, {
         method: "DELETE",
       });
       if (!response.ok) {

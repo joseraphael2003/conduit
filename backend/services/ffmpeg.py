@@ -10,13 +10,15 @@ import tempfile
 from typing import Any, Dict, List
 
 from fastapi import HTTPException
+from config import PROJECTS_BASE_DIR
 
 FFMPEG_PATH = r"D:\Program Files\PROTEUS\INSTALL\Tools\Python\ffmpeg.exe"
-PROJECTS_BASE_DIR = os.path.join("..", "projects")
 
 
 def _run_ffmpeg(cmd: List[str], log_file: str | None = None) -> None:
     """Run an ffmpeg command and capture stderr to a log file if provided."""
+    # Note: commands are passed as a list to subprocess.run with shell=False (default),
+    # which prevents shell injection. No shlex.quote() is needed.
     try:
         if log_file:
             os.makedirs(os.path.dirname(log_file), exist_ok=True)

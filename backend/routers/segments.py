@@ -9,10 +9,9 @@ from services.fireworks import FireworksClient
 from services.state import get_state, update_state
 from services.effects import validate_effect
 from models.state import ProjectState
+from config import PROJECTS_BASE_DIR
 
 segments_router = APIRouter()
-
-PROJECTS_BASE_DIR = os.path.join("..", "projects")
 
 
 class SegmentBreakdown(BaseModel):

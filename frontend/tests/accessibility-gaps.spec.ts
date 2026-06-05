@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { apiBase } from "../src/config";
 
 const mockSegments = [
   { segment_index: 0, script_line: 'Hello', segment_prompt: 'Test', characters_present: [], start_time: 0, end_time: 5 },
@@ -25,7 +26,7 @@ async function injectStyles(page: any) {
 
 test.describe('Accessibility Gap Verification', () => {
   test('Step1Script — error banner has role="alert" and aria-live="assertive"', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'Server error' }) });
     });
 
@@ -60,7 +61,7 @@ test.describe('Accessibility Gap Verification', () => {
   });
 
   test('Step2Characters — error banner has role="alert" and aria-live="assertive"', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/characters/extract', async route => {
+    await page.route(apiBase + '/projects/**/characters/extract', async route => {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'Server error' }) });
     });
 
@@ -81,13 +82,13 @@ test.describe('Accessibility Gap Verification', () => {
     await page.waitForLoadState('networkidle');
     await injectStyles(page);
 
-    await page.route('http://localhost:8000/api/v1/projects/**/characters/extract', async route => {
+    await page.route(apiBase + '/projects/**/characters/extract', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [{ name: 'Alice', type: 'main', importance: 'main', description: 'Test', front_profile_prompt: 'prompt', turnaround_reference_prompt: 'turn' }] }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/characters', async route => {
+    await page.route(apiBase + '/projects/**/characters', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/characters/prompts', async route => {
+    await page.route(apiBase + '/projects/**/characters/prompts', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [{ name: 'Alice', type: 'main', importance: 'main', description: 'Test', front_profile_prompt: 'prompt', turnaround_reference_prompt: 'turn' }] }) });
     });
 
@@ -111,10 +112,10 @@ test.describe('Accessibility Gap Verification', () => {
   });
 
   test('Step3Segments — error banner has role="alert" and aria-live="assertive"', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Not found' }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments/breakdown', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments/breakdown', async route => {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'Server error' }) });
     });
 
@@ -131,13 +132,13 @@ test.describe('Accessibility Gap Verification', () => {
   });
 
   test('Step3Segments — success banner has role="alert" and aria-live="assertive"', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Not found' }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments/breakdown', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments/breakdown', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments/prompts', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments/prompts', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
 
@@ -157,10 +158,10 @@ test.describe('Accessibility Gap Verification', () => {
   });
 
   test('Step4Images — error banner has role="alert" and aria-live="assertive"', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegments }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/images/**', async route => {
+    await page.route(apiBase + '/projects/test-uuid/images/**', async route => {
       await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Not found' }) });
     });
 
@@ -180,10 +181,10 @@ test.describe('Accessibility Gap Verification', () => {
   });
 
   test('Step4Images — modal traps focus and returns focus on close', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegments }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/images/**', async route => {
+    await page.route(apiBase + '/projects/test-uuid/images/**', async route => {
       await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Not found' }) });
     });
 
@@ -219,13 +220,13 @@ test.describe('Accessibility Gap Verification', () => {
   });
 
   test('Step5Video — error banner has role="alert" and aria-live="assertive"', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/segments', async route => {
+    await page.route(apiBase + '/projects/**/segments', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/images/**', async route => {
+    await page.route(apiBase + '/projects/**/images/**', async route => {
       await route.fulfill({ status: 200, contentType: 'image/png', body: smallPngBuffer });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/video/generate', async route => {
+    await page.route(apiBase + '/projects/**/video/generate', async route => {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'FFmpeg failed' }) });
     });
 
@@ -242,17 +243,17 @@ test.describe('Accessibility Gap Verification', () => {
   });
 
   test('Step5Video — progress bar has role="progressbar" and ARIA values', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/segments', async route => {
+    await page.route(apiBase + '/projects/**/segments', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/images/**', async route => {
+    await page.route(apiBase + '/projects/**/images/**', async route => {
       await route.fulfill({ status: 200, contentType: 'image/png', body: smallPngBuffer });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/video/generate', async route => {
+    await page.route(apiBase + '/projects/**/video/generate', async route => {
       await new Promise(resolve => setTimeout(resolve, 500));
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ output_path: 'output.mp4', duration: 10 }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/video/status', async route => {
+    await page.route(apiBase + '/projects/**/video/status', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -275,17 +276,17 @@ test.describe('Accessibility Gap Verification', () => {
   });
 
   test('Step5Video — Console toggle has aria-expanded and aria-controls', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/segments', async route => {
+    await page.route(apiBase + '/projects/**/segments', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/images/**', async route => {
+    await page.route(apiBase + '/projects/**/images/**', async route => {
       await route.fulfill({ status: 200, contentType: 'image/png', body: smallPngBuffer });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/video/generate', async route => {
+    await page.route(apiBase + '/projects/**/video/generate', async route => {
       await new Promise(resolve => setTimeout(resolve, 500));
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ output_path: 'output.mp4', duration: 10 }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/video/status', async route => {
+    await page.route(apiBase + '/projects/**/video/status', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -309,7 +310,7 @@ test.describe('Accessibility Gap Verification', () => {
     let count = 0;
 
     // Step 1 error
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'Server error' }) });
     });
     await page.goto('http://localhost:5173/project/test-uuid/step/1');
@@ -318,7 +319,7 @@ test.describe('Accessibility Gap Verification', () => {
     count += await page.locator('[role="alert"]').count();
 
     // Step 2 error
-    await page.route('http://localhost:8000/api/v1/projects/**/characters/extract', async route => {
+    await page.route(apiBase + '/projects/**/characters/extract', async route => {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'Server error' }) });
     });
     await page.goto('http://localhost:5173/project/test-uuid/step/2');
@@ -329,10 +330,10 @@ test.describe('Accessibility Gap Verification', () => {
     count += await page.locator('[role="alert"]').count();
 
     // Step 3 error
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Not found' }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments/breakdown', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments/breakdown', async route => {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'Server error' }) });
     });
     await page.goto('http://localhost:5173/project/test-uuid/step/3');
@@ -343,13 +344,13 @@ test.describe('Accessibility Gap Verification', () => {
     count += await page.locator('[role="alert"]').count();
 
     // Step 3 success
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Not found' }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments/breakdown', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments/breakdown', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments/prompts', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments/prompts', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
     await page.goto('http://localhost:5173/project/test-uuid/step/3');
@@ -362,10 +363,10 @@ test.describe('Accessibility Gap Verification', () => {
     count += await page.locator('[role="alert"]').count();
 
     // Step 4 error
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegments }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/images/**', async route => {
+    await page.route(apiBase + '/projects/test-uuid/images/**', async route => {
       await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Not found' }) });
     });
     await page.goto('http://localhost:5173/project/test-uuid/step/4');
@@ -378,13 +379,13 @@ test.describe('Accessibility Gap Verification', () => {
     count += await page.locator('[role="alert"]').count();
 
     // Step 5 error
-    await page.route('http://localhost:8000/api/v1/projects/**/segments', async route => {
+    await page.route(apiBase + '/projects/**/segments', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/images/**', async route => {
+    await page.route(apiBase + '/projects/**/images/**', async route => {
       await route.fulfill({ status: 200, contentType: 'image/png', body: smallPngBuffer });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/video/generate', async route => {
+    await page.route(apiBase + '/projects/**/video/generate', async route => {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'FFmpeg failed' }) });
     });
     await page.goto('http://localhost:5173/project/test-uuid/step/5');
@@ -407,13 +408,13 @@ test.describe('Accessibility Gap Verification', () => {
     count += await page.locator('[aria-expanded]').count();
 
     // Step 2
-    await page.route('http://localhost:8000/api/v1/projects/**/characters/extract', async route => {
+    await page.route(apiBase + '/projects/**/characters/extract', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [{ name: 'Alice', type: 'main', importance: 'main', description: 'Test', front_profile_prompt: 'prompt', turnaround_reference_prompt: 'turn' }] }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/characters', async route => {
+    await page.route(apiBase + '/projects/**/characters', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/characters/prompts', async route => {
+    await page.route(apiBase + '/projects/**/characters/prompts', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ characters: [{ name: 'Alice', type: 'main', importance: 'main', description: 'Test', front_profile_prompt: 'prompt', turnaround_reference_prompt: 'turn' }] }) });
     });
     await page.goto('http://localhost:5173/project/test-uuid/step/2');
@@ -428,17 +429,17 @@ test.describe('Accessibility Gap Verification', () => {
     count += await page.locator('[aria-expanded]').count();
 
     // Step 5
-    await page.route('http://localhost:8000/api/v1/projects/**/segments', async route => {
+    await page.route(apiBase + '/projects/**/segments', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/images/**', async route => {
+    await page.route(apiBase + '/projects/**/images/**', async route => {
       await route.fulfill({ status: 200, contentType: 'image/png', body: smallPngBuffer });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/video/generate', async route => {
+    await page.route(apiBase + '/projects/**/video/generate', async route => {
       await new Promise(resolve => setTimeout(resolve, 500));
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ output_path: 'output.mp4', duration: 10 }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/video/status', async route => {
+    await page.route(apiBase + '/projects/**/video/status', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

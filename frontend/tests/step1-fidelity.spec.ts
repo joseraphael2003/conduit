@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { apiBase } from "../src/config";
 
 const mockTranscript = {
   transcript: 'Welcome to the tutorial. Let us begin with the basics.',
@@ -17,7 +18,7 @@ async function injectStyles(page: any) {
 
 test.describe('Step 1 — Fidelity & Auto-Approve', () => {
   test.beforeEach(async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+    await page.route(apiBase + '/projects/**/state', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -27,7 +28,7 @@ test.describe('Step 1 — Fidelity & Auto-Approve', () => {
   });
 
   test('Auto-Approve button approves all remaining changes', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -70,7 +71,7 @@ test.describe('Step 1 — Fidelity & Auto-Approve', () => {
   });
 
   test('Fidelity badge is visible and shows correct percentage', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -99,7 +100,7 @@ test.describe('Step 1 — Fidelity & Auto-Approve', () => {
 
   test('Fidelity badge color changes based on fidelity level', async ({ page }) => {
     // Low fidelity: transcript and script have no common words
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -121,8 +122,8 @@ test.describe('Step 1 — Fidelity & Auto-Approve', () => {
     await expect(badge).toHaveCSS('color', 'rgb(239, 68, 68)');
 
     // Medium fidelity: 9 out of 10 words match
-    await page.unroute('http://localhost:8000/api/v1/projects/**/transcript');
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.unroute(apiBase + '/projects/**/transcript');
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -143,7 +144,7 @@ test.describe('Step 1 — Fidelity & Auto-Approve', () => {
 
   test('Next button is enabled when transcript is present, disabled when absent', async ({ page }) => {
     // With transcript present
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -161,8 +162,8 @@ test.describe('Step 1 — Fidelity & Auto-Approve', () => {
     await expect(nextButton).toBeEnabled();
 
     // Without transcript
-    await page.unroute('http://localhost:8000/api/v1/projects/**/transcript');
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.unroute(apiBase + '/projects/**/transcript');
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({
         status: 404,
         contentType: 'application/json',
@@ -178,7 +179,7 @@ test.describe('Step 1 — Fidelity & Auto-Approve', () => {
   });
 
   test('Warning modal appears for low fidelity and can close', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -215,7 +216,7 @@ test.describe('Step 1 — Fidelity & Auto-Approve', () => {
   });
 
   test('Warning modal Review Anyway proceeds to Step 2', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -246,7 +247,7 @@ test.describe('Step 1 — Fidelity & Auto-Approve', () => {
   });
 
   test('No warning modal for high fidelity and proceeds to Step 2', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

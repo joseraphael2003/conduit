@@ -11,6 +11,7 @@ import {
   Sparkle,
   PencilSimple,
 } from "@phosphor-icons/react";
+import { apiBase } from "@/config";
 
 interface Character {
   name: string;
@@ -41,7 +42,7 @@ export function Step2Characters() {
     const fetchCharacters = async () => {
       try {
         const response = await fetch(
-          `http://localhost:8000/api/v1/projects/${uuid}/characters`
+          `${apiBase}/projects/${uuid}/characters`
         );
         if (!response.ok) return;
         const data = (await response.json()) as ApiResponse;
@@ -61,7 +62,7 @@ export function Step2Characters() {
     setError(null);
     try {
       const response = await fetch(
-        `http://localhost:8000/api/v1/projects/${uuid}/characters/extract`,
+        `${apiBase}/projects/${uuid}/characters/extract`,
         { method: "POST" }
       );
       if (!response.ok) {
@@ -92,7 +93,7 @@ export function Step2Characters() {
     setError(null);
     try {
       const response = await fetch(
-        `http://localhost:8000/api/v1/projects/${uuid}/characters`,
+        `${apiBase}/projects/${uuid}/characters`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -117,7 +118,7 @@ export function Step2Characters() {
     try {
       // Save first so the backend has the latest descriptions
       const saveResponse = await fetch(
-        `http://localhost:8000/api/v1/projects/${uuid}/characters`,
+        `${apiBase}/projects/${uuid}/characters`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -130,7 +131,7 @@ export function Step2Characters() {
       setHasEdits(false);
 
       const response = await fetch(
-        `http://localhost:8000/api/v1/projects/${uuid}/characters/prompts`,
+        `${apiBase}/projects/${uuid}/characters/prompts`,
         { method: "POST" }
       );
       if (!response.ok) {

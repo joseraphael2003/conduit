@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { apiBase } from "../src/config";
 
 const mockCharacters = [
   {
@@ -38,7 +39,7 @@ test.describe('Step 2 — Characters', () => {
   test.beforeEach(async ({ page }) => {
     // Mock GET /characters
     await page.route(
-      'http://localhost:8000/api/v1/projects/**/characters',
+      apiBase + '/projects/**/characters',
       async route => {
         const url = route.request().url();
         if (url.includes('/extract') || url.includes('/prompts')) {
@@ -55,7 +56,7 @@ test.describe('Step 2 — Characters', () => {
 
     // Mock POST /characters/extract
     await page.route(
-      'http://localhost:8000/api/v1/projects/**/characters/extract',
+      apiBase + '/projects/**/characters/extract',
       async route => {
         await route.fulfill({
           status: 200,
@@ -67,7 +68,7 @@ test.describe('Step 2 — Characters', () => {
 
     // Mock PUT /characters
     await page.route(
-      'http://localhost:8000/api/v1/projects/**/characters',
+      apiBase + '/projects/**/characters',
       async route => {
         await route.fulfill({
           status: 200,
@@ -79,7 +80,7 @@ test.describe('Step 2 — Characters', () => {
 
     // Mock POST /characters/prompts
     await page.route(
-      'http://localhost:8000/api/v1/projects/**/characters/prompts',
+      apiBase + '/projects/**/characters/prompts',
       async route => {
         await route.fulfill({
           status: 200,

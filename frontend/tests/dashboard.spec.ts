@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { apiBase } from "../src/config";
 
 test.describe('Dashboard Page', () => {
   async function injectStyles(page: any) {
@@ -11,7 +12,7 @@ test.describe('Dashboard Page', () => {
 
   test.describe('Empty State', () => {
     test.beforeEach(async ({ page }) => {
-      await page.route('http://localhost:8000/api/v1/projects', async route => {
+      await page.route(apiBase + '/projects', async route => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -37,7 +38,7 @@ test.describe('Dashboard Page', () => {
 
   test.describe('With Mock Data', () => {
     test.beforeEach(async ({ page }) => {
-      await page.route('http://localhost:8000/api/v1/projects', async route => {
+      await page.route(apiBase + '/projects', async route => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',

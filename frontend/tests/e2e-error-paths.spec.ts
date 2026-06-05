@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { apiBase } from "../src/config";
 
-const apiBase = 'http://127.0.0.1:8000/api/v1';
 
 /**
  * Helper: Create a project via the backend API and return the project UUID.
@@ -92,7 +92,7 @@ test.describe('E2E Error Paths', () => {
   test('Path A — corrupted voiceover upload shows error banner, stays at Step 1', async ({ page }) => {
     // Mock the voiceover upload endpoint to return 500
     // Use localhost because the frontend calls localhost:8000
-    await page.route(`http://localhost:8000/api/v1/projects/${projectUuid}/voiceover`, async (route) => {
+    await page.route(`${apiBase}/projects/${projectUuid}/voiceover`, async (route) => {
       await route.fulfill({
         status: 500,
         contentType: 'application/json',
@@ -101,7 +101,7 @@ test.describe('E2E Error Paths', () => {
     });
 
     // Mock the state endpoint to return created (so the wizard starts at Step 1)
-    await page.route(`http://localhost:8000/api/v1/projects/${projectUuid}/state`, async (route) => {
+    await page.route(`${apiBase}/projects/${projectUuid}/state`, async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -166,7 +166,7 @@ test.describe('E2E Error Paths', () => {
 
     // Mock the GET /characters endpoint to return our test data
     // Note: page.route uses the exact URL the frontend calls (localhost)
-    await page.route(`http://localhost:8000/api/v1/projects/${projectUuid}/characters`, async (route) => {
+    await page.route(`${apiBase}/projects/${projectUuid}/characters`, async (route) => {
       if (route.request().method() === 'GET') {
         await route.fulfill({
           status: 200,

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { apiBase } from "../src/config";
 
 const mockSegments = [
   {
@@ -42,7 +43,7 @@ test.describe('Step 4 Images Page', () => {
     uploadedSegments.add(0);
 
 
-    await page.route('http://localhost:8000/api/v1/projects/test-uuid/segments', async route => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
       console.log(`[ROUTE] GET /segments - returning mock segments`);
       await route.fulfill({
         status: 200,
@@ -52,7 +53,7 @@ test.describe('Step 4 Images Page', () => {
     });
 
     await page.route(
-      'http://localhost:8000/api/v1/projects/test-uuid/images/**',
+      apiBase + '/projects/test-uuid/images/**',
       async route => {
         const url = route.request().url();
         const method = route.request().method();

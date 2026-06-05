@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import time
 from openai import OpenAI, APIConnectionError, APIStatusError
 
 logger = logging.getLogger(__name__)
@@ -14,7 +13,7 @@ async def transcribe_audio(file_path: str) -> dict:
     max_delay = 8.0
 
     def _transcribe():
-        client = OpenAI(max_retries=0)
+        client = OpenAI(max_retries=0, timeout=60.0)
         with open(file_path, "rb") as audio_file:
             response = client.audio.transcriptions.create(
                 model="whisper-1",
@@ -42,7 +41,7 @@ async def transcribe_audio(file_path: str) -> dict:
                 exc,
                 delay,
             )
-            time.sleep(delay)
+            await asyncio.sleep(delay)
         except Exception:
             raise
 

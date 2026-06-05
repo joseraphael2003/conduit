@@ -5,6 +5,43 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-06-06 — Session A: Safety & Async Fixes
+
+### Security
+- **C2 — Secure global exception handler** (`backend/main.py`) — Replaced `str(exc)` client leak with generic error message. Full exception now logged server-side via `logging` module with `exc_info=True`.
+- **C4 — FFmpeg command injection safety** (`backend/services/ffmpeg.py`) — Verified list-based `subprocess.run` with `shell=False` (default). Added explicit comment documenting why no `shlex.quote()` is needed.
+
+### Async Correctness
+- **C1 — Fix `time.sleep` in async context** (`backend/services/whisper.py`) — Replaced `time.sleep(delay)` with `await asyncio.sleep(delay)` at line 44. Removed `import time`. Prevents event loop blocking during Whisper API retries.
+- **C7 — Request timeouts on AI clients** (`backend/services/whisper.py`, `backend/services/fireworks.py`) — Added `timeout=60.0` to all `OpenAI()` constructors. Wrapped `fireworks.py` completion call with `async with asyncio.timeout(120):` to prevent indefinite hangs.
+
+### Type Safety
+- **C5 — Enable TypeScript strict mode** (`frontend/tsconfig.json`) — Added `"strict": true` to `compilerOptions`. Ran `npx tsc --noEmit` — 0 errors (codebase already compatible). No runtime changes.
+- **H7 — Fix floating promises** (`frontend/src/pages/Step1Script.tsx`, `Step3Segments.tsx`, `Step4Images.tsx`) — Added `.catch()` error handling to all `useEffect` async calls. Prevents unhandled promise rejections.
+- **H8 — Add AbortController** (`frontend/src/components/WizardShell.tsx`, `Step1Script.tsx`, `Step5Video.tsx`) — Added `AbortController` to all `useEffect` fetch hooks. Cleanup function calls `controller.abort()` on unmount to prevent race conditions.
+
+### Component Architecture
+- **C6 — React Error Boundary** (`frontend/src/components/WizardShell.tsx`) — Installed `react-error-boundary`. Wrapped `renderStepContent()` with `<ErrorBoundary fallbackRender={fallbackRender}>`. Fallback UI matches DESIGN.md: dark surface `#0F0F14`, amber `#F0A040`, `data-testid="error-boundary"`.
+- **C8 — Extract custom hooks** (`frontend/src/hooks/useDiff.ts`, `frontend/src/hooks/useTranscript.ts`) — Extracted `useDiff` (LCS + diff computation) and `useTranscript` (fetch + upload logic) from `Step1Script.tsx`. Reduced component from 670 → 459 lines (-211 lines). All types preserved.
+- **H3 — Pass `projectState` to Stepper** (`frontend/src/components/Stepper.tsx`, `WizardShell.tsx`) — Eliminated duplicate `fetchProjectState()` in Stepper. Now receives `projectState` prop from parent. Removed `useEffect`, `useState`, `useParams` from Stepper.
+
+### Configuration & Refactoring
+- **H1 — Centralize `PROJECTS_BASE_DIR`** (`backend/config.py`) — Extracted `PROJECTS_BASE_DIR` into `backend/config.py`. Updated 7 files to import from `config.py`. Eliminated DRY violation across backend.
+- **H2 — Centralize `apiBase`** (`frontend/src/config.ts`) — Extracted `apiBase` into `frontend/src/config.ts`. Updated 8 source files + 10 test files. Eliminated hardcoded URL duplication across frontend.
+
+### Testing & Infrastructure
+- **C3 — Fix test database isolation** (`backend/tests/conftest.py`) — Replaced dangerous `os.remove(models.database.DB_PATH)` with `tempfile.mkstemp(suffix=".db")`. File descriptor explicitly closed. `DB_PATH` patched inside fixture. Prevents production DB destruction during test runs.
+- **H11 — Document `check_same_thread=False`** (`backend/models/database.py`) — Added comment explaining why `check_same_thread=False` is correct for aiosqlite (internal thread pool + WAL mode). No `asyncio.Lock` added.
+- **H12 — Streaming file upload** (`backend/routers/projects.py`) — Replaced `await file.read()` + `f.write(content)` with `shutil.copyfileobj(file.file, f)`. Prevents memory bloat for large voiceover files.
+
+### Testing
+- **Backend Tests:** 102 tests (unchanged, all passing)
+- **Frontend Tests:** 73 tests (unchanged, all passing)
+- **Total:** 175 tests
+- **TypeScript:** `npx tsc --noEmit` → 0 errors
+
+---
+
 ## [0.4.0] — 2026-06-04 — Session 4: Polish
 
 ### Added

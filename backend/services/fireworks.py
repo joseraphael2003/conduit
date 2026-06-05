@@ -33,6 +33,7 @@ class FireworksClient:
             self._client = OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
+                timeout=60.0,
             )
         return self._client
 
@@ -93,7 +94,8 @@ class FireworksClient:
                 def _call():
                     return self._get_client().chat.completions.create(**kwargs)
 
-                response = await asyncio.to_thread(_call)
+                async with asyncio.timeout(120):
+                    response = await asyncio.to_thread(_call)
                 content = response.choices[0].message.content
 
                 if json_schema is not None:

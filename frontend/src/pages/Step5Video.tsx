@@ -11,6 +11,7 @@ import {
   CaretUp,
   Warning,
 } from "@phosphor-icons/react";
+import { apiBase } from "@/config";
 
 interface Segment {
   segment_index: number;
@@ -38,7 +39,7 @@ const EFFECTS = [
   { value: "zoom_out", label: "Zoom Out" },
 ];
 
-const apiBase = "http://localhost:8000/api/v1";
+
 
 const getRandomEffect = (): string => {
   const motionEffects = EFFECTS.filter((e) => e.value !== "none");
@@ -65,10 +66,10 @@ export function Step5Video() {
   const missingImagesCount =
     segments.length - Object.values(imageStatuses).filter(Boolean).length;
 
-  const fetchSegments = useCallback(async () => {
+  const fetchSegments = useCallback(async (signal?: AbortSignal) => {
     if (!uuid) return;
     try {
-      const response = await fetch(`${apiBase}/projects/${uuid}/segments`);
+      const response = await fetch(`${apiBase}/projects/${uuid}/segments`, { signal });
       if (!response.ok) {
         if (response.status === 404) {
           setSegments([]);
@@ -103,6 +104,7 @@ export function Step5Video() {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ effect: randomEffect }),
+                signal,
               }
             );
           } catch {
@@ -146,7 +148,9 @@ export function Step5Video() {
   );
 
   useEffect(() => {
-    fetchSegments();
+    const controller = new AbortController();
+    fetchSegments(controller.signal);
+    return () => controller.abort();
   }, [fetchSegments]);
 
   useEffect(() => {

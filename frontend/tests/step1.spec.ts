@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { apiBase } from "../src/config";
 
 const mockTranscript = {
   transcript: 'Welcome to the tutorial. Let us begin with the basics.',
@@ -19,7 +20,7 @@ async function injectStyles(page: any) {
 
 test.describe('Step 1 — Script', () => {
   test.beforeEach(async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+    await page.route(apiBase + '/projects/**/state', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -27,7 +28,7 @@ test.describe('Step 1 — Script', () => {
       });
     });
 
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -35,7 +36,7 @@ test.describe('Step 1 — Script', () => {
       });
     });
 
-    await page.route('http://localhost:8000/api/v1/projects/**/voiceover', async route => {
+    await page.route(apiBase + '/projects/**/voiceover', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -92,7 +93,7 @@ test.describe('Step 1 — Script', () => {
   test('Next button is enabled when transcript is present, disabled when absent', async ({ page }) => {
     let projectState = 'created';
 
-    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+    await page.route(apiBase + '/projects/**/state', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -111,8 +112,8 @@ test.describe('Step 1 — Script', () => {
     await page.screenshot({ path: 'test-results/step1-next-enabled-with-transcript.png' });
 
     // Remove transcript and reload
-    await page.unroute('http://localhost:8000/api/v1/projects/**/transcript');
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.unroute(apiBase + '/projects/**/transcript');
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({
         status: 404,
         contentType: 'application/json',
@@ -130,7 +131,7 @@ test.describe('Step 1 — Script', () => {
   });
 
   test('error banner shows retry button on API failure', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({
         status: 500,
         contentType: 'application/json',

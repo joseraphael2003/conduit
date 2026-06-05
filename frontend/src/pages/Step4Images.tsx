@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { Upload, Info, Image as ImageIcon, X } from "@phosphor-icons/react";
+import { apiBase } from "@/config";
 
 interface Segment {
   segment_index: number;
@@ -25,7 +26,7 @@ export function Step4Images() {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const modalRef = useFocusTrap(!!selectedSegment, () => setSelectedSegment(null), triggerRef);
 
-  const apiBase = "http://localhost:8000/api/v1";
+
 
   const fetchSegments = useCallback(async () => {
     if (!uuid) return;
@@ -60,7 +61,9 @@ export function Step4Images() {
   }, [uuid]);
 
   useEffect(() => {
-    fetchSegments();
+    fetchSegments().catch((err) => {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    });
   }, [fetchSegments]);
 
   useEffect(() => {

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { apiBase } from "../src/config";
 
 test.describe('Wizard Page', () => {
   async function injectStyles(page: any) {
@@ -19,7 +20,7 @@ test.describe('Wizard Page', () => {
   }
 
   test.beforeEach(async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+    await page.route(apiBase + '/projects/**/state', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'created' }) });
     });
     await page.goto('http://localhost:5173/project/test-uuid');
@@ -28,7 +29,7 @@ test.describe('Wizard Page', () => {
   });
 
   test('renders Conduit heading', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+    await page.route(apiBase + '/projects/**/state', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'created' }) });
     });
     await page.reload();
@@ -41,7 +42,7 @@ test.describe('Wizard Page', () => {
   });
 
   test('stepper has exactly 5 children', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+    await page.route(apiBase + '/projects/**/state', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'created' }) });
     });
     await page.reload();
@@ -53,7 +54,7 @@ test.describe('Wizard Page', () => {
   });
 
   test('active step has amber color', async ({ page }) => {
-    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+    await page.route(apiBase + '/projects/**/state', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'created' }) });
     });
     await page.reload();
@@ -66,11 +67,11 @@ test.describe('Wizard Page', () => {
   });
 
   test('completed step has teal color', async ({ page }) => {
-    await page.unroute('http://localhost:8000/api/v1/projects/**/state');
-    await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
+    await page.unroute(apiBase + '/projects/**/state');
+    await page.route(apiBase + '/projects/**/state', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'step_1_complete' }) });
     });
-    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+    await page.route(apiBase + '/projects/**/transcript', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ transcript: 'Test transcript', word_count: 2 }) });
     });
     await page.reload();
