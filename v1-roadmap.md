@@ -94,8 +94,10 @@
 | **2** | 4–10 | Frontend wiring + Steps 2–4 | 7–12 | 25 |
 | **3** | 11–12 | ffmpeg + Step 5 | 4–6 | 31 |
 | **4** | 13 | Cascade + Polish + Testing | 2–3 | 34 |
+| **A** | Audit fixes | Safety, async, config, type safety | 6–8 | 40–42 |
+| **B** | (planned) | Refactoring, performance, DRY | 8–12 | 48–54 |
 
-**Reality estimate:** 35–40 hours total.
+**Reality estimate:** 35–40 hours total (Sessions 1–4). Session A + B add ~14–20 hours for audit remediation.
 
 ---
 
@@ -123,4 +125,4 @@ These two files are the single source of truth for all visual and technical deci
 
 ## Next Action
 
-**Session 1 begins.** Scaffolding Phase 0 first.
+**Session B begins.** Fix remaining 17 audit issues (H4–H6, H9–H10, H13–H14, M1–M10).

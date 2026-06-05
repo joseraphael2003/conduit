@@ -1100,6 +1100,7 @@ project/
 | **Build tool** | Vite | Fast HMR, modern bundling |
 | **File upload** | Native HTML5 + drag-and-drop | Simple grid |
 | **State** | Server-side (SQLite) | No complex client state needed |
+| **Type safety** | TypeScript `strict` mode | Enabled in `tsconfig.json` (zero errors) |
 
 ### 9.3 Infrastructure
 
@@ -1153,7 +1154,8 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 **Process:**
 - Single FastAPI process (Uvicorn with 1 worker)
-- Video generation runs synchronously in the request (since it's local, no timeout)
+- Video generation runs synchronously in the request (since it's local, no timeout for ffmpeg itself)
+- AI API calls (Whisper, Fireworks) have explicit timeouts: `timeout=60.0` on OpenAI client, `asyncio.timeout(120)` on Fireworks completions
 - ffmpeg is CPU-bound; no GPU needed for video encoding (RTX 3060M is idle during video generation)
 
 ### 10.2 No Railway / Cloud Deployment
@@ -1176,6 +1178,8 @@ This tool is designed for local use only. If future cloud deployment is needed, 
 | **Not open source** | Repo is private. No hardcoded secrets. |
 | **Future open source** | All secrets are env-var based. Configurable via `.env` file. |
 | **Local access** | localhost only — no public exposure |
+| **Exception handler leaks** | Global exception handler returns generic error message to client; full exception logged server-side via `logging` module (never return `str(exc)` to client) |
+| **Command injection (ffmpeg)** | All ffmpeg commands passed as lists to `subprocess.run` with `shell=False` (default). No shell string concatenation. `shlex.quote()` is not needed for list-based commands. |
 
 ---
 

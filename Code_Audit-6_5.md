@@ -730,7 +730,7 @@ const handleApproveRemaining = () => {
 | C1 | `services/whisper.py:45` | 1 line | `time.sleep` → `asyncio.sleep` |
 | C2 | `main.py:27-32` | 5 lines | Generic error message + server-side logging |
 | C3 | `tests/conftest.py:49-50` | 10 lines | Use `tempfile.mkstemp` for test DB |
-| C4 | `services/ffmpeg.py:254-255` | 3 lines | Add `shlex.quote()` |
+| C4 | `services/ffmpeg.py:254-255` | 3 lines | Verify list-based `subprocess.run` with `shell=False` (already safe). Add comment documenting why `shlex.quote()` is not needed. |
 | C5 | `tsconfig.json` | 1 line + fixes | Enable `strict: true`; fix type errors |
 | C6 | `WizardShell.tsx` | ~20 lines | Add `react-error-boundary` wrapper |
 | C7 | `services/whisper.py`, `services/fireworks.py` | ~5 lines | Add `timeout=60` to OpenAI client |
@@ -740,7 +740,7 @@ const handleApproveRemaining = () => {
 | H3 | `WizardShell.tsx`, `Stepper.tsx` | ~15 lines | Pass `projectState` prop to `Stepper` |
 | H7 | `Step1Script.tsx`, `Step3Segments.tsx`, `Step4Images.tsx` | ~20 lines | Add `.catch()` to floating promises |
 | H8 | `WizardShell.tsx`, `Step1Script.tsx`, `Step5Video.tsx` | ~30 lines | Add `AbortController` to `fetch()` calls |
-| H11 | `models/database.py:8` | ~10 lines | Add `asyncio.Lock` or connection pool |
+| H11 | `models/database.py:8` | ~10 lines | Document why `check_same_thread=False` is safe for aiosqlite (internal thread pool + WAL mode). Do not add `asyncio.Lock` (would serialize all requests). |
 | H12 | `routers/projects.py:232-234` | 3 lines | `shutil.copyfileobj` for streaming |
 
 ### Session B — Refactoring & Performance
