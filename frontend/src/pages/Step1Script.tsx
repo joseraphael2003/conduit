@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { AmberBar } from "@/components/AmberBar";
@@ -140,7 +140,11 @@ function isValidAudioFile(file: File): boolean {
   );
 }
 
-export function Step1Script() {
+interface Step1ScriptProps {
+  onStep1Ready?: (data: { hasTranscript: boolean; hasScript: boolean; fidelity: number | null }) => void;
+}
+
+export function Step1Script({ onStep1Ready }: Step1ScriptProps) {
   const { uuid } = useParams<{ uuid: string }>();
   const [transcript, setTranscript] = useState<string>("");
   const [script, setScript] = useState<string>("");
@@ -181,6 +185,8 @@ export function Step1Script() {
   useEffect(() => {
     fetchTranscript();
   }, [fetchTranscript]);
+
+
 
   const handleUpload = (file: File) => {
     if (!uuid) return;
@@ -271,8 +277,52 @@ export function Step1Script() {
     });
   };
 
+  const handleApproveRemaining = () => {
+    diffBlocks.forEach((block, index) => {
+      if (block.type !== "equal" && !approvedChanges.has(index) && !rejectedChanges.has(index)) {
+        handleApprove(index);
+      }
+    });
+  };
+
   const diffBlocks = script ? computeDiff(transcript, script) : [];
   const hasChanges = diffBlocks.some((b) => b.type !== "equal");
+  const unreviewedCount = diffBlocks.filter(
+    (b, i) => b.type !== "equal" && !approvedChanges.has(i) && !rejectedChanges.has(i)
+  ).length;
+
+  const fidelity = useMemo(() => {
+    if (!script || !script.trim()) return null;
+
+    const countNonWhitespace = (words: string[]) =>
+      words.filter((w) => w.trim().length > 0).length;
+
+    const totalScriptWords = diffBlocks.reduce(
+      (sum, block) => sum + countNonWhitespace(block.newWords),
+      0
+    );
+
+    if (totalScriptWords === 0) return null;
+
+    const matchedWords = diffBlocks.reduce((sum, block, index) => {
+      if (block.type === "equal" || approvedChanges.has(index)) {
+        return sum + countNonWhitespace(block.newWords);
+      }
+      return sum;
+    }, 0);
+
+    return (matchedWords / totalScriptWords) * 100;
+  }, [diffBlocks, approvedChanges, script]);
+
+  useEffect(() => {
+    if (onStep1Ready) {
+      onStep1Ready({
+        hasTranscript: transcript.trim().length > 0,
+        hasScript: script.trim().length > 0,
+        fidelity,
+      });
+    }
+  }, [transcript, script, fidelity, onStep1Ready]);
 
   return (
     <div className="p-6 max-w-[1200px] mx-auto flex flex-col gap-6">
@@ -448,9 +498,39 @@ export function Step1Script() {
             <span className="font-body text-sm font-semibold text-[#E8E8F0]">
               AI Diff
             </span>
-            <span className="font-body text-xs text-[#5A5A6A] ml-auto">
-              {hasChanges ? `${diffBlocks.filter((b) => b.type !== "equal").length} changes` : "No changes"}
-            </span>
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={handleApproveRemaining}
+                disabled={unreviewedCount === 0}
+                data-testid="approve-remaining"
+                className={cn(
+                  "flex items-center gap-1 px-4 py-2 font-body text-xs font-semibold tracking-wide uppercase",
+                  "bg-transparent text-[#8A8A9A] hover:bg-[#1E1E28] hover:text-[#E8E8F0]",
+                  "disabled:text-[#5A5A6A] disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                )}
+              >
+                <Check size={12} weight="regular" />
+                Approve Remaining
+              </button>
+              {fidelity !== null && (
+                <span
+                  data-testid="fidelity-badge"
+                  className={cn(
+                    "px-2 py-1 font-body text-[10px] font-semibold uppercase tracking-wide",
+                    fidelity >= 95
+                      ? "bg-[#0F2818] text-[#22C55E]"
+                      : fidelity >= 80
+                        ? "bg-[#2A2500] text-[#EAB308]"
+                        : "bg-[#2A1010] text-[#EF4444]"
+                  )}
+                >
+                  {Math.round(fidelity)}%
+                </span>
+              )}
+              <span className="font-body text-xs text-[#5A5A6A]">
+                {hasChanges ? `${diffBlocks.filter((b) => b.type !== "equal").length} changes` : "No changes"}
+              </span>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto" style={{ maxHeight: "600px" }}>

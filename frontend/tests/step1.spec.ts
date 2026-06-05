@@ -89,7 +89,7 @@ test.describe('Step 1 — Script', () => {
     await page.screenshot({ path: 'test-results/step1-diff-ui.png' });
   });
 
-  test('Next button is disabled initially, enabled after transcript', async ({ page }) => {
+  test('Next button is enabled when transcript is present, disabled when absent', async ({ page }) => {
     let projectState = 'created';
 
     await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
@@ -106,20 +106,27 @@ test.describe('Step 1 — Script', () => {
 
     const nextButton = page.locator('button', { hasText: 'Next' });
 
-    // Initially disabled because step is not complete
-    await expect(nextButton).toBeDisabled();
-    await page.screenshot({ path: 'test-results/step1-next-disabled.png' });
+    // Enabled because transcript is present (even with state 'created')
+    await expect(nextButton).toBeEnabled();
+    await page.screenshot({ path: 'test-results/step1-next-enabled-with-transcript.png' });
 
-    // Update state to step_1_complete and reload
-    projectState = 'step_1_complete';
+    // Remove transcript and reload
+    await page.unroute('http://localhost:8000/api/v1/projects/**/transcript');
+    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Not found' }),
+      });
+    });
+
     await page.reload();
     await page.waitForLoadState('networkidle');
     await injectStyles(page);
 
-    // Now enabled and transcript is visible
-    await expect(nextButton).toBeEnabled();
-    await expect(page.locator('[data-testid="transcript-display"]')).toBeVisible();
-    await page.screenshot({ path: 'test-results/step1-next-enabled.png' });
+    // Now disabled because no transcript
+    await expect(nextButton).toBeDisabled();
+    await page.screenshot({ path: 'test-results/step1-next-disabled-no-transcript.png' });
   });
 
   test('error banner shows retry button on API failure', async ({ page }) => {

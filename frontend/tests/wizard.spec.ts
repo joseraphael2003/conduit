@@ -70,6 +70,9 @@ test.describe('Wizard Page', () => {
     await page.route('http://localhost:8000/api/v1/projects/**/state', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'step_1_complete' }) });
     });
+    await page.route('http://localhost:8000/api/v1/projects/**/transcript', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ transcript: 'Test transcript', word_count: 2 }) });
+    });
     await page.reload();
     await page.waitForLoadState('networkidle');
     await injectStyles(page);

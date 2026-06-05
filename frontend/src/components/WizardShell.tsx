@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { Stepper } from "./Stepper";
-import { ArrowLeft, ArrowRight } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowRight, Warning, X } from "@phosphor-icons/react";
 import { Step1Script } from "@/pages/Step1Script";
 import { Step2Characters } from "@/pages/Step2Characters";
 import { Step3Segments } from "@/pages/Step3Segments";
@@ -27,6 +28,14 @@ export function WizardShell({ children }: WizardShellProps) {
     return isNaN(num) ? 1 : Math.max(1, Math.min(5, num));
   });
   const [projectState, setProjectState] = useState<ProjectState | null>(null);
+  const [step1Data, setStep1Data] = useState({
+    hasTranscript: false,
+    hasScript: false,
+    fidelity: null as number | null,
+  });
+  const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const modalRef = useFocusTrap(isWarningModalOpen, () => setIsWarningModalOpen(false), triggerRef);
 
   useEffect(() => {
     const num = parseInt(stepNumber || "1", 10);
@@ -64,6 +73,10 @@ export function WizardShell({ children }: WizardShellProps) {
     return step <= completedSteps;
   };
 
+  const handleStep1Ready = useCallback((data: { hasTranscript: boolean; hasScript: boolean; fidelity: number | null }) => {
+    setStep1Data(data);
+  }, []);
+
   const handleBack = () => {
     if (currentStep > 1) {
       const nextStep = currentStep - 1;
@@ -72,11 +85,25 @@ export function WizardShell({ children }: WizardShellProps) {
     }
   };
 
+  const goToStep = (nextStep: number) => {
+    setCurrentStep(nextStep);
+    navigate(`/project/${uuid}/step/${nextStep}`);
+  };
+
   const handleNext = () => {
     if (currentStep < 5) {
       const nextStep = currentStep + 1;
-      setCurrentStep(nextStep);
-      navigate(`/project/${uuid}/step/${nextStep}`);
+      if (
+        currentStep === 1 &&
+        step1Data.hasScript &&
+        step1Data.fidelity !== null &&
+        step1Data.fidelity < 95
+      ) {
+        triggerRef.current = document.activeElement as HTMLButtonElement;
+        setIsWarningModalOpen(true);
+        return;
+      }
+      goToStep(nextStep);
     }
   };
 
@@ -86,7 +113,7 @@ export function WizardShell({ children }: WizardShellProps) {
   const renderStepContent = () => {
     switch (currentStep) {
       case 1:
-        return <Step1Script />;
+        return <Step1Script onStep1Ready={handleStep1Ready} />;
       case 2:
         return <Step2Characters />;
       case 3:
@@ -101,7 +128,9 @@ export function WizardShell({ children }: WizardShellProps) {
   };
 
   const isCurrentStepComplete = isStepComplete(currentStep);
-  const canGoNext = isCurrentStepComplete && currentStep < 5;
+  const canGoNext = currentStep === 1
+    ? step1Data.hasTranscript && currentStep < 5
+    : isCurrentStepComplete && currentStep < 5;
 
   return (
     <div className="wizard-shell flex flex-col h-screen">
@@ -120,10 +149,7 @@ export function WizardShell({ children }: WizardShellProps) {
 
       {/* Stepper Bar */}
       <nav className="stepper h-[56px] bg-[#0A0A0F] border-b border-[#2A2A35] shrink-0 flex items-center justify-between px-8" aria-label="Wizard steps">
-        <Stepper currentStep={currentStep} onStepClick={(step) => {
-          setCurrentStep(step);
-          navigate(`/project/${uuid}/step/${step}`);
-        }} />
+        <Stepper currentStep={currentStep} onStepClick={(step) => goToStep(step)} />
       </nav>
 
       {/* Main Content Area */}
@@ -158,6 +184,78 @@ export function WizardShell({ children }: WizardShellProps) {
           <ArrowRight size={16} weight="regular" />
         </button>
       </footer>
+
+      {/* Low Fidelity Warning Modal */}
+      {isWarningModalOpen && (
+        <div
+          ref={modalRef}
+          className="fixed inset-0 bg-[#0F0F14]/80 flex items-center justify-center z-50 p-4"
+          onClick={() => setIsWarningModalOpen(false)}
+          data-testid="warning-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="warning-modal-title"
+        >
+          <div
+            className="bg-[#1A1A24] border border-[#2A2A35] w-full max-w-[520px] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[#2A2A35]">
+              <h2
+                id="warning-modal-title"
+                className="font-headline text-xl text-[#E8E8F0]"
+              >
+                Low Fidelity Warning
+              </h2>
+              <button
+                onClick={() => setIsWarningModalOpen(false)}
+                className="flex items-center justify-center w-8 h-8 bg-transparent text-[#8A8A9A] hover:text-[#E8E8F0] hover:bg-[#1A1A24]"
+                aria-label="Close warning modal"
+              >
+                <X size={18} weight="regular" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex flex-col gap-4 p-4">
+              <div className="flex items-start gap-3">
+                <Warning size={20} weight="regular" className="text-[#F0A040] mt-0.5 shrink-0" />
+                <p className="font-body text-sm text-[#E8E8F0]">
+                  Your transcript fidelity is {step1Data.fidelity}%. This means there are significant differences between your voiceover and the original script. You can review the changes or proceed anyway.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 px-4 py-3 border-t border-[#2A2A35]">
+              <button
+                onClick={() => setIsWarningModalOpen(false)}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 font-body text-sm font-semibold tracking-wide uppercase",
+                  "bg-transparent text-[#8A8A9A] hover:bg-[#1A1A24] hover:text-[#E8E8F0]"
+                )}
+                data-testid="continue-reviewing"
+              >
+                Continue Reviewing
+              </button>
+              <button
+                onClick={() => {
+                  setIsWarningModalOpen(false);
+                  goToStep(2);
+                }}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 font-body text-sm font-semibold tracking-wide uppercase",
+                  "bg-[#F0A040] text-[#0F0F14] hover:bg-[#F5B860]"
+                )}
+                data-testid="review-anyway"
+              >
+                Review Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
