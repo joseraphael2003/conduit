@@ -68,6 +68,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **OpenAI API key** — Validated working (billing added during Session 2)
 - **lucide-react** — Removed from `package.json`; `components.json` updated to `@phosphor-icons/react`
 
+## [0.4.1] — 2026-06-05 — Step 1 UX Improvements
+
+### Added
+- **`Auto-Approve "Remaining" button`** (`frontend/src/pages/Step1Script.tsx`) — Bulk-approve all unreviewed diff changes without overriding rejections. Disabled when no changes remain.
+- **`Fidelity percentage badge`** (`frontend/src/pages/Step1Script.tsx`) — Real-time fidelity metric showing transcript faithfulness to original script. Formula: `(equal words + approved changes) / total script words × 100`. Color-coded: green ≥95%, warning 80–94%, red <80%. Uses `label-sm` typography and `badge-*` tokens from DESIGN.md.
+- **`onStep1Ready` callback** (`frontend/src/pages/Step1Script.tsx` → `frontend/src/components/WizardShell.tsx`) — Bi-directional communication between child and parent. `Step1Script` exposes `hasTranscript`, `hasScript`, and `fidelity` to `WizardShell` via stable `useCallback` callback (prevents infinite render loops).
+- **Non-blocking warning modal** (`frontend/src/components/WizardShell.tsx`) — Appears when user presses Next with fidelity < 95% and original script present. Offers "Review Anyway" (proceeds to Step 2) and "Continue Reviewing" (closes modal). Modal has `role="dialog"`, `aria-modal="true"`, focus trap via `useFocusTrap`, and `triggerRef` for focus return.
+- **Shared `goToStep` helper** — Extracted from `handleNext` to ensure `setCurrentStep` + `navigate` stay synchronized across normal navigation and modal "Review Anyway" path.
+- **`frontend/tests/step1-fidelity.spec.ts`** — 7 new Playwright tests covering:
+  - Auto-Approve button functionality
+  - Fidelity badge display and color changes
+  - Next button enabled/disabled states
+  - Warning modal appearance and dismissal
+  - "Review Anyway" navigation to Step 2
+  - High fidelity navigation without modal
+
+### Changed
+- **`WizardShell.tsx` `canGoNext` logic** — Step 1 now uses `step1Data.hasTranscript` (frontend state) instead of `isStepComplete` (backend state). Steps 2–5 remain unchanged.
+- **`frontend/tests/step1.spec.ts`** — Updated test "Next button is disabled initially, enabled after transcript" to match new behavior: Next enabled when transcript present (regardless of backend state).
+- **`frontend/tests/wizard.spec.ts`** — Updated "completed step has teal color" test to mock transcript endpoint so Next button is enabled before clicking.
+
+### Fixed
+- **`null < 95` coercion bug** — Warning modal condition explicitly checks `fidelity !== null` before `fidelity < 95` to prevent `null` from coercing to `0` and triggering false positives.
+- **Whitespace token counting** — `computeDiff` splits with `/(\s+)/`, producing whitespace tokens in arrays. Fidelity calculation explicitly filters `token.trim().length > 0` to avoid inflated percentages.
+
+### Testing
+- **Frontend Tests:** 82 tests (up from 75 in Session 4)
+- **Backend Tests:** 102 tests (unchanged)
+- **Total:** 184 tests
+
 ---
 
 ## [0.3.0] — 2026-06-04 — Session 3: Video Generation + Step 1 Frontend

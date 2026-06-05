@@ -41,6 +41,7 @@
 - Step 2 must be completed before Step 3
 - And so on
 - Each step has a **Next** button (enabled when prerequisites are met) and a **Back** button (to return to previous step)
+- **Step 1 Next button:** Enabled when transcript is present (frontend state), regardless of backend `step_1_complete`. If original script is present and fidelity < 95%, pressing Next shows a non-blocking warning modal with "Review Anyway" and "Continue Reviewing" options.
 - Progress indicator at the top: Step 1 → Step 2 → Step 3 → Step 4 → Step 5
 
 **Cascade Rule:** If the user clicks **Back** to a previous step and makes any edit, all **downstream steps are automatically invalidated** and must be re-run.
@@ -309,8 +310,16 @@ class Differences(BaseModel):
 - Show the differences in a diff UI (like GitHub diff)
 - User can approve, reject, or edit each change
 - Approved changes are locked in
+- **Fidelity percentage badge** — displayed in diff header, real-time calculation: `(equal words + approved changes) / total script words × 100`. Color-coded: green ≥95%, amber 80–94%, red <80%. Provides at-a-glance metric of transcript faithfulness.
+- **Auto-Approve button** — "Approve Remaining" in diff header (ghost style) bulk-approves all unreviewed changes without overriding rejections. Disabled when no unreviewed changes remain.
 
-#### Step 1c: Generate Source of Truth Script
+#### Step 1c: Quality Gate (Next Button)
+
+- **Next button logic:** Enabled when transcript is present (frontend state), regardless of backend completion status.
+- **Warning modal:** If original script is present and fidelity < 95%, pressing Next shows a non-blocking warning modal explaining the fidelity gap. User can choose "Review Anyway" (proceeds to Step 2) or "Continue Reviewing" (closes modal, stays on Step 1).
+- **No original script:** Next proceeds immediately without warning.
+
+#### Step 1d: Generate Source of Truth Script
 
 - Merge all approved changes into a single corrected text
 - Save as `source_of_truth_script.txt`

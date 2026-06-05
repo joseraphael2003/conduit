@@ -801,6 +801,8 @@ Used for details panels, confirmation dialogs, and JSON preview.
 - **Transcript Display:** Scrollable text area (600px height) showing raw transcript. `body-md` Source Sans 3.
 - **Original Script Input:** Collapsible textarea below the upload zone. `body-md` monospace for the script.
 - **AI Diff UI:** Side-by-side diff view (like GitHub). Left = transcript, Right = script. Changes highlighted with `success` and `error` colors. Each change has Approve/Reject buttons.
+- **Auto-Approve:** "Approve Remaining" button in diff header (ghost style) — bulk-approves all unreviewed changes without overriding rejections. Disabled when no unreviewed changes remain.
+- **Fidelity Badge:** Percentage badge in diff header showing `(equal + approved) / total script words × 100`. Color-coded: `success` green ≥95%, `warning` amber 80–94%, `error` red <80%. Hidden when no script present.
 - **Progress:** During Whisper transcription, show a progress bar with `mono-sm` text: "Chunk 3 of 12..."
 
 ### Step 2: Characters
