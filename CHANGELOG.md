@@ -5,6 +5,16 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] — 2026-06-06 — Follow-up Fixes
+
+### Security
+- **Fix exception leak in `images.py`** (`backend/routers/images.py:89`) — Replaced `detail=f"Invalid image file: {exc}"` with generic `detail="Invalid image file — please upload a valid PNG"`. Added `logging.error("Image validation failed", exc_info=exc)` for full server-side logging. This was the last remaining `str(exc)` leak in the backend.
+
+### Fixed
+- **Sync `package.json` version** (`frontend/package.json`) — Bumped `0.5.0` → `0.6.0` to match the `[0.6.0]` release tag.
+
+---
+
 ## [0.6.0] — 2026-06-06 — Session B: Refactoring, Performance & DRY
 
 ### Backend Refactoring
@@ -33,16 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Pre-existing Issue (not in Session B scope)
 - **Exception leak in `images.py`** — `backend/routers/images.py:89` contains `detail=f"Invalid image file: {exc}"` which leaks the raw exception string to the client. This violates the architecture rule "Never return `str(exc)` to the client." Recommended for follow-up cleanup.
-
----
-
-## [0.6.1] — 2026-06-06 — Follow-up Fixes
-
-### Security
-- **Fix exception leak in `images.py`** (`backend/routers/images.py:89`) — Replaced `detail=f"Invalid image file: {exc}"` with generic `detail="Invalid image file — please upload a valid PNG"`. Added `logging.error("Image validation failed", exc_info=exc)` for full server-side logging. This was the last remaining `str(exc)` leak in the backend.
-
-### Fixed
-- **Sync `package.json` version** (`frontend/package.json`) — Bumped `0.5.0` → `0.6.0` to match the `[0.6.0]` release tag.
 
 ---
 
