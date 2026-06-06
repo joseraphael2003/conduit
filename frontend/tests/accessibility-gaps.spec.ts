@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { apiBase } from "../src/config";
+import { injectStyles } from './utils';
 
 const mockSegments = [
   { segment_index: 0, script_line: 'Hello', segment_prompt: 'Test', characters_present: [], start_time: 0, end_time: 5 },
@@ -13,16 +14,6 @@ const mockSegmentsStep3 = [
 
 const smallPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 const smallPngBuffer = Buffer.from(smallPngBase64, 'base64');
-
-async function injectStyles(page: any) {
-  await page.addStyleTag({
-    content: `
-      .font-headline { font-family: 'Playfair Display', serif; }
-      .font-body { font-family: 'Source Sans 3', sans-serif; }
-      .font-mono { font-family: 'JetBrains Mono', monospace; }
-    `,
-  });
-}
 
 test.describe('Accessibility Gap Verification', () => {
   test('Step1Script — error banner has role="alert" and aria-live="assertive"', async ({ page }) => {
@@ -224,7 +215,13 @@ test.describe('Accessibility Gap Verification', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
     await page.route(apiBase + '/projects/**/images/**', async route => {
+      if (route.request().url().includes('/images/status')) {
+        return route.fallback();
+      }
       await route.fulfill({ status: 200, contentType: 'image/png', body: smallPngBuffer });
+    });
+    await page.route(apiBase + '/projects/**/images/status', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ "0": true, "1": true }) });
     });
     await page.route(apiBase + '/projects/**/video/generate', async route => {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'FFmpeg failed' }) });
@@ -247,7 +244,13 @@ test.describe('Accessibility Gap Verification', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
     await page.route(apiBase + '/projects/**/images/**', async route => {
+      if (route.request().url().includes('/images/status')) {
+        return route.fallback();
+      }
       await route.fulfill({ status: 200, contentType: 'image/png', body: smallPngBuffer });
+    });
+    await page.route(apiBase + '/projects/**/images/status', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ "0": true, "1": true }) });
     });
     await page.route(apiBase + '/projects/**/video/generate', async route => {
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -280,7 +283,13 @@ test.describe('Accessibility Gap Verification', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
     await page.route(apiBase + '/projects/**/images/**', async route => {
+      if (route.request().url().includes('/images/status')) {
+        return route.fallback();
+      }
       await route.fulfill({ status: 200, contentType: 'image/png', body: smallPngBuffer });
+    });
+    await page.route(apiBase + '/projects/**/images/status', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ "0": true, "1": true }) });
     });
     await page.route(apiBase + '/projects/**/video/generate', async route => {
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -383,7 +392,13 @@ test.describe('Accessibility Gap Verification', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
     await page.route(apiBase + '/projects/**/images/**', async route => {
+      if (route.request().url().includes('/images/status')) {
+        return route.fallback();
+      }
       await route.fulfill({ status: 200, contentType: 'image/png', body: smallPngBuffer });
+    });
+    await page.route(apiBase + '/projects/**/images/status', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ "0": true, "1": true }) });
     });
     await page.route(apiBase + '/projects/**/video/generate', async route => {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'FFmpeg failed' }) });
@@ -433,7 +448,13 @@ test.describe('Accessibility Gap Verification', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ segments: mockSegmentsStep3 }) });
     });
     await page.route(apiBase + '/projects/**/images/**', async route => {
+      if (route.request().url().includes('/images/status')) {
+        return route.fallback();
+      }
       await route.fulfill({ status: 200, contentType: 'image/png', body: smallPngBuffer });
+    });
+    await page.route(apiBase + '/projects/**/images/status', async route => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ "0": true, "1": true }) });
     });
     await page.route(apiBase + '/projects/**/video/generate', async route => {
       await new Promise(resolve => setTimeout(resolve, 500));

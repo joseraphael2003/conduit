@@ -1,14 +1,10 @@
-import { test, expect } from '@playwright/test';
-import { execSync } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
+import { test, expect, type APIRequestContext } from '@playwright/test';
 import { apiBase } from "../src/config";
-
 
 /**
  * Helper: Create a project via the backend API and return the project UUID.
  */
-async function createProject(request: any): Promise<string> {
+async function createProject(request: APIRequestContext): Promise<string> {
   const response = await request.post(`${apiBase}/projects`, {
     data: { name: 'E2E Error Path Test' },
     headers: { 'Content-Type': 'application/json' },
@@ -19,18 +15,10 @@ async function createProject(request: any): Promise<string> {
 }
 
 /**
- * Helper: Advance project state to a specific step.
- */
-async function advanceToStep(request: any, projectUuid: string, step: number): Promise<void> {
-  const response = await request.put(`${apiBase}/projects/${projectUuid}/step/${step}`);
-  expect(response.status()).toBe(200);
-}
-
-/**
  * Helper: Set up a project via the backend API to step_3_complete with segments and images.
  * Uses the test backend (run_test_backend.py) which mocks AI services.
  */
-async function setupProjectViaApi(request: any, projectUuid: string): Promise<void> {
+async function setupProjectViaApi(request: APIRequestContext, projectUuid: string): Promise<void> {
   // Upload a voiceover to create transcript, words, and script
   const voiceoverBuffer = Buffer.from('not real audio');
   const uploadResponse = await request.post(`${apiBase}/projects/${projectUuid}/voiceover`, {

@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { apiBase } from "../src/config";
+import { injectStyles } from './utils';
 
 const mockTranscript = {
   transcript: 'Welcome to the tutorial. Let us begin with the basics.',
@@ -7,16 +8,6 @@ const mockTranscript = {
 };
 
 const mockScript = 'Welcome to the tutorial. Let us start with the fundamentals.';
-
-async function injectStyles(page: any) {
-  await page.addStyleTag({
-    content: `
-      .font-headline { font-family: 'Playfair Display', serif; }
-      .font-body { font-family: 'Source Sans 3', sans-serif; }
-      .font-mono { font-family: 'JetBrains Mono', monospace; }
-    `,
-  });
-}
 
 test.describe('Step 1 — Script', () => {
   test.beforeEach(async ({ page }) => {

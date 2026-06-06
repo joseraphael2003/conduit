@@ -1,8 +1,10 @@
+import logging
 import os
 import json
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, status
+from openai._exceptions import AuthenticationError, RateLimitError, APIError
 from pydantic import BaseModel, Field
 
 from services.fireworks import FireworksClient
@@ -12,6 +14,29 @@ from models.state import ProjectState
 from config import PROJECTS_BASE_DIR
 
 segments_router = APIRouter()
+
+
+def _handle_fireworks_error(exc: Exception) -> None:
+    """Map Fireworks/OpenAI exceptions to HTTPExceptions."""
+    if isinstance(exc, AuthenticationError):
+        logging.error("AI authentication failed", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI service authentication failed",
+        ) from exc
+    if isinstance(exc, RateLimitError):
+        logging.error("AI rate limited", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="AI service rate limited, retry shortly",
+        ) from exc
+    if isinstance(exc, APIError):
+        logging.error("AI request failed", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI request failed",
+        ) from exc
+    raise exc
 
 
 class SegmentBreakdown(BaseModel):
@@ -141,13 +166,6 @@ async def _generate_prompts_in_batches(
     return [result_map[seg["segment_index"]] for seg in segments if seg["segment_index"] in result_map]
 
 
-def _ensure_step_2_complete(uuid: str) -> None:
-    """Validate that the project is at least at step_2_complete."""
-    # Note: we cannot use async get_state here because this is a sync helper.
-    # The caller should do the async check before calling this.
-    pass
-
-
 @segments_router.post("/projects/{uuid}/segments/breakdown", response_model=Segments)
 async def breakdown_segments(uuid: str):
     """Break down script into segments using Fireworks AI.
@@ -206,11 +224,8 @@ async def breakdown_segments(uuid: str):
             ],
             json_schema=Segments,
         )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Fireworks API failure: {exc}",
-        )
+    except (AuthenticationError, RateLimitError, APIError) as exc:
+        _handle_fireworks_error(exc)
 
     if not isinstance(result, dict) or "segments" not in result:
         raise HTTPException(
@@ -481,20 +496,14 @@ async def generate_segment_prompts(uuid: str):
     client = FireworksClient()
     try:
         result = await _generate_prompts_for_batch(segments, characters_data, client)
-    except Exception as exc:
-        if _is_token_limit_error(exc):
+    except (AuthenticationError, RateLimitError, APIError) as exc:
+        if isinstance(exc, APIError) and _is_token_limit_error(exc):
             try:
                 result = await _generate_prompts_in_batches(segments, characters_data, client)
-            except Exception as batch_exc:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Fireworks API failure: {batch_exc}",
-                ) from batch_exc
+            except (AuthenticationError, RateLimitError, APIError) as batch_exc:
+                _handle_fireworks_error(batch_exc)
         else:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Fireworks API failure: {exc}",
-            ) from exc
+            _handle_fireworks_error(exc)
 
     # Build a map of segment_index -> result
     result_map = {seg["segment_index"]: seg for seg in result}

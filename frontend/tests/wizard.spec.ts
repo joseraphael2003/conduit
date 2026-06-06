@@ -1,24 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { apiBase } from "../src/config";
+import { injectStyles } from './utils';
 
 test.describe('Wizard Page', () => {
-  async function injectStyles(page: any) {
-    await page.addStyleTag({
-      content: `
-        .font-headline { font-family: 'Playfair Display', serif; }
-        .font-body { font-family: 'Source Sans 3', sans-serif; }
-      `,
-    });
-    await page.evaluate(() => {
-      const code = document.createElement('code');
-      code.className = 'font-mono';
-      code.textContent = 'test';
-      code.style.position = 'absolute';
-      code.style.left = '-9999px';
-      document.body.appendChild(code);
-    });
-  }
-
   test.beforeEach(async ({ page }) => {
     await page.route(apiBase + '/projects/**/state', async route => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'created' }) });
@@ -106,6 +90,14 @@ test.describe('Wizard Page', () => {
   });
 
   test('code elements use JetBrains Mono font', async ({ page }) => {
+    await page.evaluate(() => {
+      const code = document.createElement('code');
+      code.className = 'font-mono';
+      code.textContent = 'test';
+      code.style.position = 'absolute';
+      code.style.left = '-9999px';
+      document.body.appendChild(code);
+    });
     const codeElement = page.locator('.font-mono').first();
     await expect(codeElement).toHaveCSS('font-family', /JetBrains Mono/);
     await page.screenshot({ path: 'test-results/wizard-code-font.png' });

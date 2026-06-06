@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { apiBase } from "../src/config";
+import { injectStyles } from './utils';
 
 const mockSegments = [
   {
@@ -28,16 +29,6 @@ const mockSegments = [
   },
 ];
 
-async function injectStyles(page: any) {
-  await page.addStyleTag({
-    content: `
-      .font-headline { font-family: 'Playfair Display', serif; }
-      .font-body { font-family: 'Source Sans 3', sans-serif; }
-      .font-mono { font-family: 'JetBrains Mono', monospace; }
-    `,
-  });
-}
-
 test.describe('Step 5 — Video Generation', () => {
   test.beforeEach(async ({ page }) => {
     await page.route(apiBase + '/projects/**/state', async route => {
@@ -59,6 +50,9 @@ test.describe('Step 5 — Video Generation', () => {
     await page.route(
       apiBase + '/projects/**/images/**',
       async route => {
+        if (route.request().url().includes('/images/status')) {
+          return route.fallback();
+        }
         await route.fulfill({
           status: 404,
           contentType: 'application/json',
@@ -66,6 +60,14 @@ test.describe('Step 5 — Video Generation', () => {
         });
       }
     );
+
+    await page.route(apiBase + '/projects/**/images/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({}),
+      });
+    });
 
     await page.route(apiBase + '/projects/**/video/srt', async route => {
       await route.fulfill({
@@ -149,6 +151,9 @@ test.describe('Step 5 — Video Generation', () => {
     await page.route(
       apiBase + '/projects/**/images/**',
       async route => {
+        if (route.request().url().includes('/images/status')) {
+          return route.fallback();
+        }
         await route.fulfill({
           status: 200,
           contentType: 'image/png',
@@ -159,6 +164,14 @@ test.describe('Step 5 — Video Generation', () => {
         });
       }
     );
+
+    await page.route(apiBase + '/projects/**/images/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ "0": true, "1": true, "2": true }),
+      });
+    });
 
     await page.goto('http://localhost:5173/project/test-uuid/step/5');
     await page.waitForLoadState('networkidle');
@@ -173,6 +186,9 @@ test.describe('Step 5 — Video Generation', () => {
     await page.route(
       apiBase + '/projects/**/images/**',
       async route => {
+        if (route.request().url().includes('/images/status')) {
+          return route.fallback();
+        }
         await route.fulfill({
           status: 200,
           contentType: 'image/png',
@@ -183,6 +199,14 @@ test.describe('Step 5 — Video Generation', () => {
         });
       }
     );
+
+    await page.route(apiBase + '/projects/**/images/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ "0": true, "1": true, "2": true }),
+      });
+    });
 
     // Delay the generate endpoint so we can catch the progress bar
     await page.route(apiBase + '/projects/**/video/generate', async route => {
@@ -216,6 +240,9 @@ test.describe('Step 5 — Video Generation', () => {
     await page.route(
       apiBase + '/projects/**/images/**',
       async route => {
+        if (route.request().url().includes('/images/status')) {
+          return route.fallback();
+        }
         await route.fulfill({
           status: 200,
           contentType: 'image/png',
@@ -226,6 +253,14 @@ test.describe('Step 5 — Video Generation', () => {
         });
       }
     );
+
+    await page.route(apiBase + '/projects/**/images/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ "0": true, "1": true, "2": true }),
+      });
+    });
 
     await page.route(apiBase + '/projects/**/video/generate', async route => {
       await route.fulfill({
@@ -252,6 +287,9 @@ test.describe('Step 5 — Video Generation', () => {
     await page.route(
       apiBase + '/projects/**/images/**',
       async route => {
+        if (route.request().url().includes('/images/status')) {
+          return route.fallback();
+        }
         await route.fulfill({
           status: 200,
           contentType: 'image/png',
@@ -262,6 +300,14 @@ test.describe('Step 5 — Video Generation', () => {
         });
       }
     );
+
+    await page.route(apiBase + '/projects/**/images/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ "0": true, "1": true, "2": true }),
+      });
+    });
 
     await page.route(apiBase + '/projects/**/video/generate', async route => {
       await route.fulfill({
@@ -292,6 +338,9 @@ test.describe('Step 5 — Video Generation', () => {
     await page.route(
       apiBase + '/projects/**/images/**',
       async route => {
+        if (route.request().url().includes('/images/status')) {
+          return route.fallback();
+        }
         await route.fulfill({
           status: 200,
           contentType: 'image/png',
@@ -302,6 +351,14 @@ test.describe('Step 5 — Video Generation', () => {
         });
       }
     );
+
+    await page.route(apiBase + '/projects/**/images/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ "0": true, "1": true, "2": true }),
+      });
+    });
 
     await page.route(apiBase + '/projects/**/video/generate', async route => {
       await route.fulfill({

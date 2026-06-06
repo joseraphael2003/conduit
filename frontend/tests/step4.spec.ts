@@ -57,8 +57,23 @@ test.describe('Step 4 Images Page', () => {
       async route => {
         const url = route.request().url();
         const method = route.request().method();
-        const segmentIndex = parseInt(url.split('/').pop() || '0', 10);
-        console.log(`[ROUTE] ${method} ${url} segmentIndex=${segmentIndex} uploadedSegments=${Array.from(uploadedSegments)}`);
+        const lastSegment = url.split('/').pop() || '';
+        console.log(`[ROUTE] ${method} ${url} lastSegment=${lastSegment} uploadedSegments=${Array.from(uploadedSegments)}`);
+
+        if (lastSegment === 'status') {
+          const statusMap: Record<string, boolean> = {};
+          for (const seg of mockSegments) {
+            statusMap[String(seg.segment_index)] = uploadedSegments.has(seg.segment_index);
+          }
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(statusMap),
+          });
+          return;
+        }
+
+        const segmentIndex = parseInt(lastSegment, 10);
 
         if (method === 'POST') {
           uploadedSegments.add(segmentIndex);

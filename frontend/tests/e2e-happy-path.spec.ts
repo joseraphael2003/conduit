@@ -1,33 +1,13 @@
 import { test, expect } from '@playwright/test';
-import { execSync } from 'child_process';
 import { existsSync, readFileSync, readdirSync, statSync, mkdirSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
 import { apiBase } from "../src/config";
+import { injectStyles, isBackendRunning } from './utils';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-
-function isBackendRunning(): boolean {
-  try {
-    execSync('curl -s http://localhost:8000/health', { stdio: 'pipe', shell: 'cmd.exe' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function injectStyles(page: any) {
-  await page.addStyleTag({
-    content: `
-      .font-headline { font-family: 'Playfair Display', serif; }
-      .font-body { font-family: 'Source Sans 3', sans-serif; }
-      .font-mono { font-family: 'JetBrains Mono', monospace; }
-    `,
-  });
-}
 
 // Small valid MP3 header for test uploads
 const testMp3Buffer = Buffer.from([0xff, 0xfb, 0x90, 0x00]);
@@ -42,7 +22,7 @@ test.describe('E2E Happy Path — Full 5-Step Wizard', () => {
   let testProjectsDir: string = '';
 
   test.beforeAll(async () => {
-    if (!isBackendRunning()) {
+    if (!await isBackendRunning()) {
       throw new Error('Test backend is not running on port 8000. Please start it with: python backend/run_test_backend.py');
     }
     console.log('Backend confirmed running on port 8000');
@@ -69,7 +49,7 @@ test.describe('E2E Happy Path — Full 5-Step Wizard', () => {
     await page.locator('button', { hasText: 'Create Project' }).click();
 
     // Wait for the project to appear in the list
-    await page.waitForSelector('h2', { hasText: 'E2E Happy Path Test' });
+    await page.locator('h2', { hasText: 'E2E Happy Path Test' }).waitFor();
 
     // Click Open on the first matching project
     const projectCard = page.locator('h2', { hasText: 'E2E Happy Path Test' }).first().locator('xpath=../..');

@@ -1,14 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { apiBase } from "../src/config";
+import { injectStyles } from './utils';
 
 test.describe('Dashboard Page', () => {
-  async function injectStyles(page: any) {
-    await page.addStyleTag({
-      content: `
-        .font-headline { font-family: 'Playfair Display', serif; }
-      `,
-    });
-  }
 
   test.describe('Empty State', () => {
     test.beforeEach(async ({ page }) => {

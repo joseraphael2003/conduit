@@ -1,7 +1,8 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "types": ["@playwright/test"]
+    "types": ["@playwright/test", "node"]
   },
-  "include": ["."]
+  "include": ["."],
+  "exclude": ["global-setup.ts"]
 }

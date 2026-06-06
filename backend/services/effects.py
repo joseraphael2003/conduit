@@ -8,10 +8,10 @@ EFFECTS = {
     "none": None,
     "zoom_in": {"zoom_start": 1.0, "zoom_end": 1.03, "pan_speed": 0},
     "zoom_out": {"zoom_start": 1.03, "zoom_end": 1.0, "pan_speed": 0},
-    "pan_left": {"zoom_start": 1.02, "zoom_end": 1.02, "pan_speed": -2},
-    "pan_right": {"zoom_start": 1.02, "zoom_end": 1.02, "pan_speed": 2},
-    "pan_up": {"zoom_start": 1.02, "zoom_end": 1.02, "pan_speed": 2},
-    "pan_down": {"zoom_start": 1.02, "zoom_end": 1.02, "pan_speed": -2},
+    "pan_left": {"zoom_start": 1.0, "zoom_end": 1.0, "pan_speed": 2},
+    "pan_right": {"zoom_start": 1.0, "zoom_end": 1.0, "pan_speed": -2},
+    "pan_up": {"zoom_start": 1.0, "zoom_end": 1.0, "pan_speed": 2},
+    "pan_down": {"zoom_start": 1.0, "zoom_end": 1.0, "pan_speed": -2},
 }
 
 
@@ -54,20 +54,22 @@ def build_zoompan_filter(effect_name: str, duration: float, fps: int = 24) -> st
     zoom_end = params["zoom_end"]
     pan_speed = params["pan_speed"]
 
-    zoom_delta = zoom_end - zoom_start
     base = f"zoompan=d={total_frames}:s=1920x1080:fps={fps}"
+    x_default = "x='iw/2-(iw/zoom/2)'"
+    y_default = "y='ih/2-(ih/zoom/2)'"
 
     if effect_name in ("zoom_in", "zoom_out"):
+        zoom_delta = round(zoom_end - zoom_start, 2)
         z_expr = f"{zoom_start}+on/{total_frames}*{zoom_delta}"
-        return f"{base}:z='{z_expr}'"
+        return f"{base}:z='{z_expr}':{x_default}:{y_default}"
 
     if effect_name in ("pan_left", "pan_right"):
         x_expr = f"iw/2-(iw/zoom/2)+on*{pan_speed}"
-        return f"{base}:x='{x_expr}'"
+        return f"{base}:z=1:x='{x_expr}':{y_default}"
 
     if effect_name in ("pan_up", "pan_down"):
         y_expr = f"ih/2-(ih/zoom/2)+on*{pan_speed}"
-        return f"{base}:y='{y_expr}'"
+        return f"{base}:z=1:{x_default}:y='{y_expr}'"
 
     return base
 

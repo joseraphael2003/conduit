@@ -11,6 +11,7 @@ from typing import Any, Dict, List
 
 from fastapi import HTTPException
 from config import PROJECTS_BASE_DIR
+import services.effects as effects
 
 FFMPEG_PATH = r"D:\Program Files\PROTEUS\INSTALL\Tools\Python\ffmpeg.exe"
 
@@ -56,7 +57,7 @@ def _write_progress(project_dir: str, progress: int) -> None:
         except (json.JSONDecodeError, OSError):
             data = {}
         data["video_progress"] = progress
-        data["updated_at"] = datetime.datetime.utcnow().isoformat()
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
         try:
             with open(state_json_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
@@ -82,7 +83,6 @@ def generate_segment_clip(
       - pan_up:    pan up (positive pan_speed)
       - pan_down:  pan down (negative pan_speed)
     """
-    total_frames = int(duration * 24)
     scale_pad = (
         "scale=1920:1080:force_original_aspect_ratio=decrease,"
         "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black"
@@ -106,93 +106,24 @@ def generate_segment_clip(
             *common_args,
             output_path,
         ]
-    elif effect == "zoom_in":
-        zoom_expr = f"1+on/{total_frames}*0.03"
-        vf = f"zoompan=z='{zoom_expr}':d={total_frames}:fps=24,{scale_pad}"
-        cmd = [
-            FFMPEG_PATH,
-            "-y",
-            "-loop", "1",
-            "-i", image_path,
-            "-t", str(duration),
-            "-vf", vf,
-            *common_args,
-            output_path,
-        ]
-    elif effect == "zoom_out":
-        zoom_expr = f"1.03-on/{total_frames}*0.03"
-        vf = f"zoompan=z='{zoom_expr}':d={total_frames}:fps=24,{scale_pad}"
-        cmd = [
-            FFMPEG_PATH,
-            "-y",
-            "-loop", "1",
-            "-i", image_path,
-            "-t", str(duration),
-            "-vf", vf,
-            *common_args,
-            output_path,
-        ]
-    elif effect == "pan_left":
-        pan_speed = -0.5
-        x_expr = f"iw/2-(iw/zoom/2)+on*{pan_speed}"
-        vf = f"zoompan=x='{x_expr}':d={total_frames}:fps=24,{scale_pad}"
-        cmd = [
-            FFMPEG_PATH,
-            "-y",
-            "-loop", "1",
-            "-i", image_path,
-            "-t", str(duration),
-            "-vf", vf,
-            *common_args,
-            output_path,
-        ]
-    elif effect == "pan_right":
-        pan_speed = 0.5
-        x_expr = f"iw/2-(iw/zoom/2)+on*{pan_speed}"
-        vf = f"zoompan=x='{x_expr}':d={total_frames}:fps=24,{scale_pad}"
-        cmd = [
-            FFMPEG_PATH,
-            "-y",
-            "-loop", "1",
-            "-i", image_path,
-            "-t", str(duration),
-            "-vf", vf,
-            *common_args,
-            output_path,
-        ]
-    elif effect == "pan_up":
-        pan_speed = 0.5
-        y_expr = f"ih/2-(ih/zoom/2)+on*{pan_speed}"
-        vf = f"zoompan=y='{y_expr}':d={total_frames}:fps=24,{scale_pad}"
-        cmd = [
-            FFMPEG_PATH,
-            "-y",
-            "-loop", "1",
-            "-i", image_path,
-            "-t", str(duration),
-            "-vf", vf,
-            *common_args,
-            output_path,
-        ]
-    elif effect == "pan_down":
-        pan_speed = -0.5
-        y_expr = f"ih/2-(ih/zoom/2)+on*{pan_speed}"
-        vf = f"zoompan=y='{y_expr}':d={total_frames}:fps=24,{scale_pad}"
-        cmd = [
-            FFMPEG_PATH,
-            "-y",
-            "-loop", "1",
-            "-i", image_path,
-            "-t", str(duration),
-            "-vf", vf,
-            *common_args,
-            output_path,
-        ]
     else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown effect: {effect}",
-        )
+        try:
+            vf = effects.build_zoompan_filter(effect, duration)
+        except (KeyError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown effect: {effect}",
+            )
+        cmd = [
+            FFMPEG_PATH,
+            "-y",
+            "-loop", "1",
+            "-i", image_path,
+            "-t", str(duration),
+            "-vf", vf,
+            *common_args,
+            output_path,
+        ]
 
     _run_ffmpeg(cmd, log_file)
 

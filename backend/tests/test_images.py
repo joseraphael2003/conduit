@@ -274,3 +274,82 @@ async def test_upload_image_segment_not_found(async_client, temp_images_dir, cle
     )
     assert response.status_code == 404, f"Expected 404, got {response.status_code}: {response.text}"
     assert response.json()["detail"] == "Segment 2 not found"
+
+
+@pytest.mark.asyncio
+async def test_get_images_status(async_client, temp_images_dir, cleanup_projects):
+    """GET /api/v1/projects/{uuid}/images/status returns correct map for all segments."""
+    # Create a project
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Image Test"})
+    assert create_resp.status_code == 201
+    project = create_resp.json()
+    project_uuid = project["uuid"]
+
+    # Create segments.json with segments 1 and 2
+    project_dir = os.path.join(temp_images_dir, project_uuid)
+    segments_path = os.path.join(project_dir, "segments.json")
+    segments_data = {
+        "segments": [
+            {"segment_index": 1, "script_line": "Hello"},
+            {"segment_index": 2, "script_line": "World"},
+        ]
+    }
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump(segments_data, f)
+
+    # Upload image only for segment 1
+    png_data = create_test_png(1920, 1080)
+    upload_resp = await async_client.post(
+        f"/api/v1/projects/{project_uuid}/images/1",
+        files={"file": ("test.png", io.BytesIO(png_data), "image/png")},
+    )
+    assert upload_resp.status_code == 200
+
+    # Get status
+    status_resp = await async_client.get(f"/api/v1/projects/{project_uuid}/images/status")
+    assert status_resp.status_code == 200, f"Expected 200, got {status_resp.status_code}: {status_resp.text}"
+    data = status_resp.json()
+    assert data == {"1": True, "2": False}
+
+
+@pytest.mark.asyncio
+async def test_get_images_status_project_not_found(async_client, temp_images_dir, cleanup_projects):
+    """GET /api/v1/projects/{uuid}/images/status with missing project returns 404."""
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response = await async_client.get(f"/api/v1/projects/{fake_uuid}/images/status")
+    assert response.status_code == 404, f"Expected 404, got {response.status_code}: {response.text}"
+    assert response.json()["detail"] == "Project not found"
+
+
+@pytest.mark.asyncio
+async def test_get_images_status_segments_not_found(async_client, temp_images_dir, cleanup_projects):
+    """GET /api/v1/projects/{uuid}/images/status with missing segments.json returns 404."""
+    # Create a project (no segments.json)
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Image Test"})
+    assert create_resp.status_code == 201
+    project = create_resp.json()
+    project_uuid = project["uuid"]
+
+    response = await async_client.get(f"/api/v1/projects/{project_uuid}/images/status")
+    assert response.status_code == 404, f"Expected 404, got {response.status_code}: {response.text}"
+    assert response.json()["detail"] == "Project segments not found"
+
+
+@pytest.mark.asyncio
+async def test_get_images_status_empty_segments(async_client, temp_images_dir, cleanup_projects):
+    """GET /api/v1/projects/{uuid}/images/status with empty segments returns {}."""
+    # Create a project
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Image Test"})
+    assert create_resp.status_code == 201
+    project = create_resp.json()
+    project_uuid = project["uuid"]
+
+    # Create segments.json with empty segments list
+    project_dir = os.path.join(temp_images_dir, project_uuid)
+    segments_path = os.path.join(project_dir, "segments.json")
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump({"segments": []}, f)
+
+    response = await async_client.get(f"/api/v1/projects/{project_uuid}/images/status")
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+    assert response.json() == {}

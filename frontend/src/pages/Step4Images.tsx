@@ -44,20 +44,22 @@ export function Step4Images() {
     }
   }, [uuid]);
 
-  const checkImageStatus = useCallback(async (segmentIndex: number) => {
+  const fetchImageStatuses = useCallback(async (signal?: AbortSignal) => {
     if (!uuid) return;
-    try {
-      const response = await fetch(`${apiBase}/projects/${uuid}/images/${segmentIndex}`);
-      setImageStatuses(prev => ({
-        ...prev,
-        [segmentIndex]: response.ok
-      }));
-    } catch {
-      setImageStatuses(prev => ({
-        ...prev,
-        [segmentIndex]: false
-      }));
+    const response = await fetch(`${apiBase}/projects/${uuid}/images/status`, { signal });
+    if (response.status === 404) {
+      setImageStatuses({});
+      return;
     }
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image statuses: ${response.status}`);
+    }
+    const data = await response.json() as Record<string, boolean>;
+    const statuses: Record<number, boolean> = {};
+    for (const [key, value] of Object.entries(data)) {
+      statuses[Number(key)] = value;
+    }
+    setImageStatuses(statuses);
   }, [uuid]);
 
   useEffect(() => {
@@ -68,11 +70,17 @@ export function Step4Images() {
 
   useEffect(() => {
     if (segments.length > 0) {
-      segments.forEach(seg => {
-        checkImageStatus(seg.segment_index);
+      const controller = new AbortController();
+      fetchImageStatuses(controller.signal).catch((err) => {
+        if (err.name !== "AbortError") {
+          console.error("Failed to fetch image statuses:", err);
+        }
       });
+      return () => {
+        controller.abort();
+      };
     }
-  }, [segments, checkImageStatus]);
+  }, [segments, fetchImageStatuses]);
 
   const handleUploadClick = (segmentNumber: number) => {
     const input = fileInputRefs.current[segmentNumber];
@@ -99,7 +107,7 @@ export function Step4Images() {
       if (!response.ok) {
         throw new Error(`Upload failed: ${response.status}`);
       }
-      await checkImageStatus(segmentNumber);
+      await fetchImageStatuses();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {

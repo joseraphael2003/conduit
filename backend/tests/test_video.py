@@ -551,10 +551,10 @@ def test_effects_get_params_all():
     assert effects_module.get_effect_params("none") is None
     assert effects_module.get_effect_params("zoom_in") == {"zoom_start": 1.0, "zoom_end": 1.03, "pan_speed": 0}
     assert effects_module.get_effect_params("zoom_out") == {"zoom_start": 1.03, "zoom_end": 1.0, "pan_speed": 0}
-    assert effects_module.get_effect_params("pan_left") == {"zoom_start": 1.02, "zoom_end": 1.02, "pan_speed": -2}
-    assert effects_module.get_effect_params("pan_right") == {"zoom_start": 1.02, "zoom_end": 1.02, "pan_speed": 2}
-    assert effects_module.get_effect_params("pan_up") == {"zoom_start": 1.02, "zoom_end": 1.02, "pan_speed": 2}
-    assert effects_module.get_effect_params("pan_down") == {"zoom_start": 1.02, "zoom_end": 1.02, "pan_speed": -2}
+    assert effects_module.get_effect_params("pan_left") == {"zoom_start": 1.0, "zoom_end": 1.0, "pan_speed": 2}
+    assert effects_module.get_effect_params("pan_right") == {"zoom_start": 1.0, "zoom_end": 1.0, "pan_speed": -2}
+    assert effects_module.get_effect_params("pan_up") == {"zoom_start": 1.0, "zoom_end": 1.0, "pan_speed": 2}
+    assert effects_module.get_effect_params("pan_down") == {"zoom_start": 1.0, "zoom_end": 1.0, "pan_speed": -2}
 
 
 def test_effects_get_params_unknown():
@@ -589,41 +589,49 @@ def test_effects_random_assign():
 def test_effects_build_zoompan_filter_zoom_in():
     """Test build_zoompan_filter for zoom_in."""
     f = effects_module.build_zoompan_filter("zoom_in", 2.0, 24)
-    assert f.startswith("zoompan=d=48:s=1920x1080:fps=24:z='")
-    assert "1.0+on/48*" in f
-    assert "0.03" in f
+    assert "zoompan" in f
+    assert "d=48" in f
+    assert "s=1920x1080" in f
+    assert "fps=24" in f
+    assert "z='1.0+on/48*0.03'" in f
+    assert "x='iw/2-(iw/zoom/2)'" in f
+    assert "y='ih/2-(ih/zoom/2)'" in f
 
 
 def test_effects_build_zoompan_filter_zoom_out():
     """Test build_zoompan_filter for zoom_out."""
     f = effects_module.build_zoompan_filter("zoom_out", 1.0, 30)
-    assert f.startswith("zoompan=d=30:s=1920x1080:fps=30:z='")
-    assert "1.03+on/30*" in f
-    assert "-0.03" in f
+    assert "zoompan" in f
+    assert "d=30" in f
+    assert "s=1920x1080" in f
+    assert "fps=30" in f
+    assert "z='1.03+on/30*-0.03'" in f
+    assert "x='iw/2-(iw/zoom/2)'" in f
+    assert "y='ih/2-(ih/zoom/2)'" in f
 
 
 def test_effects_build_zoompan_filter_pan_left():
     """Test build_zoompan_filter for pan_left."""
     f = effects_module.build_zoompan_filter("pan_left", 2.0, 24)
-    assert f == "zoompan=d=48:s=1920x1080:fps=24:x='iw/2-(iw/zoom/2)+on*-2'"
+    assert f == "zoompan=d=48:s=1920x1080:fps=24:z=1:x='iw/2-(iw/zoom/2)+on*2':y='ih/2-(ih/zoom/2)'"
 
 
 def test_effects_build_zoompan_filter_pan_right():
     """Test build_zoompan_filter for pan_right."""
     f = effects_module.build_zoompan_filter("pan_right", 2.0, 24)
-    assert f == "zoompan=d=48:s=1920x1080:fps=24:x='iw/2-(iw/zoom/2)+on*2'"
+    assert f == "zoompan=d=48:s=1920x1080:fps=24:z=1:x='iw/2-(iw/zoom/2)+on*-2':y='ih/2-(ih/zoom/2)'"
 
 
 def test_effects_build_zoompan_filter_pan_up():
     """Test build_zoompan_filter for pan_up."""
     f = effects_module.build_zoompan_filter("pan_up", 2.0, 24)
-    assert f == "zoompan=d=48:s=1920x1080:fps=24:y='ih/2-(ih/zoom/2)+on*2'"
+    assert f == "zoompan=d=48:s=1920x1080:fps=24:z=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)+on*2'"
 
 
 def test_effects_build_zoompan_filter_pan_down():
     """Test build_zoompan_filter for pan_down."""
     f = effects_module.build_zoompan_filter("pan_down", 2.0, 24)
-    assert f == "zoompan=d=48:s=1920x1080:fps=24:y='ih/2-(ih/zoom/2)+on*-2'"
+    assert f == "zoompan=d=48:s=1920x1080:fps=24:z=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)+on*-2'"
 
 
 def test_effects_build_zoompan_filter_none_raises():
@@ -692,7 +700,9 @@ def test_ffmpeg_generate_segment_clip_zoom_in():
         cmd = mock_run.call_args[0][0]
         vf_arg = _get_vf_arg(cmd)
         assert "zoompan" in vf_arg
-        assert "1+on/24*0.03" in vf_arg
+        assert "z='1.0+on/24*0.03'" in vf_arg
+        assert "s=1920x1080" in vf_arg
+        assert "scale=1920" not in vf_arg
 
 
 def test_ffmpeg_generate_segment_clip_zoom_out():
@@ -702,7 +712,9 @@ def test_ffmpeg_generate_segment_clip_zoom_out():
         cmd = mock_run.call_args[0][0]
         vf_arg = _get_vf_arg(cmd)
         assert "zoompan" in vf_arg
-        assert "1.03-on/24*0.03" in vf_arg
+        assert "z='1.03+on/24*-0.03'" in vf_arg
+        assert "s=1920x1080" in vf_arg
+        assert "scale=1920" not in vf_arg
 
 
 def test_ffmpeg_generate_segment_clip_pan_left():
@@ -712,7 +724,9 @@ def test_ffmpeg_generate_segment_clip_pan_left():
         cmd = mock_run.call_args[0][0]
         vf_arg = _get_vf_arg(cmd)
         assert "zoompan" in vf_arg
-        assert "-0.5" in vf_arg
+        assert "x='iw/2-(iw/zoom/2)+on*2'" in vf_arg
+        assert "s=1920x1080" in vf_arg
+        assert "scale=1920" not in vf_arg
 
 
 def test_ffmpeg_generate_segment_clip_pan_right():
@@ -722,7 +736,9 @@ def test_ffmpeg_generate_segment_clip_pan_right():
         cmd = mock_run.call_args[0][0]
         vf_arg = _get_vf_arg(cmd)
         assert "zoompan" in vf_arg
-        assert "0.5" in vf_arg
+        assert "x='iw/2-(iw/zoom/2)+on*-2'" in vf_arg
+        assert "s=1920x1080" in vf_arg
+        assert "scale=1920" not in vf_arg
 
 
 def test_ffmpeg_generate_segment_clip_pan_up():
@@ -732,7 +748,9 @@ def test_ffmpeg_generate_segment_clip_pan_up():
         cmd = mock_run.call_args[0][0]
         vf_arg = _get_vf_arg(cmd)
         assert "zoompan" in vf_arg
-        assert "0.5" in vf_arg
+        assert "y='ih/2-(ih/zoom/2)+on*2'" in vf_arg
+        assert "s=1920x1080" in vf_arg
+        assert "scale=1920" not in vf_arg
 
 
 def test_ffmpeg_generate_segment_clip_pan_down():
@@ -742,7 +760,9 @@ def test_ffmpeg_generate_segment_clip_pan_down():
         cmd = mock_run.call_args[0][0]
         vf_arg = _get_vf_arg(cmd)
         assert "zoompan" in vf_arg
-        assert "-0.5" in vf_arg
+        assert "y='ih/2-(ih/zoom/2)+on*-2'" in vf_arg
+        assert "s=1920x1080" in vf_arg
+        assert "scale=1920" not in vf_arg
 
 
 def test_ffmpeg_generate_segment_clip_unknown():

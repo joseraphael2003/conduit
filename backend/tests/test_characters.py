@@ -155,7 +155,55 @@ async def test_extract_characters_fireworks_failure(async_client, cleanup_projec
             f"/api/v1/projects/{project_uuid}/characters/extract"
         )
         assert response.status_code == 502
-        assert "Character extraction failed" in response.json()["detail"]
+        assert "AI request failed" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_extract_characters_authentication_error(async_client, cleanup_projects, created_project):
+    """Fireworks API authentication error returns 502."""
+    project_uuid = created_project["uuid"]
+    step1_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    assert step1_resp.status_code == 200
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    script_path = os.path.join(conduit_dir, "source_of_truth_script.txt")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write("Some script content")
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(401, json={"error": "Unauthorized"})
+        )
+        response = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/characters/extract"
+        )
+        assert response.status_code == 502
+        assert "AI service authentication failed" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_extract_characters_rate_limit_error(async_client, cleanup_projects, created_project):
+    """Fireworks API rate limit error returns 429."""
+    project_uuid = created_project["uuid"]
+    step1_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    assert step1_resp.status_code == 200
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    script_path = os.path.join(conduit_dir, "source_of_truth_script.txt")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write("Some script content")
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(429, json={"error": "Rate limited"})
+        )
+        response = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/characters/extract"
+        )
+        assert response.status_code == 429
+        assert "AI service rate limited, retry shortly" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -402,7 +450,7 @@ async def test_generate_prompts_fireworks_failure(async_client, cleanup_projects
             f"/api/v1/projects/{project_uuid}/characters/prompts"
         )
         assert response.status_code == 502
-        assert "Prompt generation failed" in response.json()["detail"]
+        assert "AI request failed" in response.json()["detail"]
 
     # Assert characters.json is preserved (extraction data not lost)
     with open(characters_path, "r", encoding="utf-8") as f:
@@ -410,3 +458,69 @@ async def test_generate_prompts_fireworks_failure(async_client, cleanup_projects
     assert "front_profile_prompt" not in saved["characters"][0]
     assert "turnaround_prompt" not in saved["characters"][0]
     assert saved["characters"][0]["name"] == "Alice"
+
+
+@pytest.mark.asyncio
+async def test_generate_prompts_authentication_error(async_client, cleanup_projects, created_project):
+    """Fireworks API authentication error returns 502."""
+    project_uuid = created_project["uuid"]
+    step1_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    assert step1_resp.status_code == 200
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    characters_path = os.path.join(project_dir, "characters.json")
+    initial_characters = {
+        "characters": [
+            {
+                "name": "Alice",
+                "type": "protagonist",
+                "importance": "main",
+                "description": "A brave knight.",
+            }
+        ]
+    }
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump(initial_characters, f)
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(401, json={"error": "Unauthorized"})
+        )
+        response = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/characters/prompts"
+        )
+        assert response.status_code == 502
+        assert "AI service authentication failed" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_generate_prompts_rate_limit_error(async_client, cleanup_projects, created_project):
+    """Fireworks API rate limit error returns 429."""
+    project_uuid = created_project["uuid"]
+    step1_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    assert step1_resp.status_code == 200
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    characters_path = os.path.join(project_dir, "characters.json")
+    initial_characters = {
+        "characters": [
+            {
+                "name": "Alice",
+                "type": "protagonist",
+                "importance": "main",
+                "description": "A brave knight.",
+            }
+        ]
+    }
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump(initial_characters, f)
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(429, json={"error": "Rate limited"})
+        )
+        response = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/characters/prompts"
+        )
+        assert response.status_code == 429
+        assert "AI service rate limited, retry shortly" in response.json()["detail"]

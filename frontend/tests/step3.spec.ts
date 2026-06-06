@@ -1,17 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { apiBase } from "../src/config";
+import { injectStyles } from './utils';
 
 test.describe('Step 3 - Segments', () => {
-  async function injectStyles(page: any) {
-    await page.addStyleTag({
-      content: `
-        .font-headline { font-family: 'Playfair Display', serif; }
-        .font-body { font-family: 'Source Sans 3', sans-serif; }
-        .font-mono { font-family: 'JetBrains Mono', monospace; }
-      `,
-    });
-  }
-
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5173/project/test-uuid/step/3');
     await page.waitForLoadState('networkidle');
@@ -142,7 +133,7 @@ test.describe('Step 3 - Segments', () => {
     });
 
     await page.locator('button', { hasText: 'Generate Segments' }).click();
-    await page.waitForSelector('button', { hasText: 'Retry' });
+    await page.locator('button', { hasText: 'Retry' }).waitFor();
 
     const retryButton = page.locator('button', { hasText: 'Retry' });
     await expect(retryButton).toBeVisible();

@@ -161,6 +161,32 @@ async def upload_image(project_uuid: str, segment_index: int, file: UploadFile =
     }
 
 
+@images_router.get("/projects/{project_uuid}/images/status")
+async def get_images_status(project_uuid: str):
+    """Return a map of segment_index -> bool for every segment in segments.json."""
+    project_dir = _get_project_dir(project_uuid)
+    if not os.path.exists(project_dir):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    segments_data = _load_segments(project_uuid)
+    segments = segments_data.get("segments", [])
+
+    if not segments:
+        return {}
+
+    status_map = {}
+    for segment in segments:
+        segment_index = segment.get("segment_index")
+        if segment_index is not None:
+            image_path = _get_image_path(project_uuid, segment_index)
+            status_map[str(segment_index)] = os.path.exists(image_path)
+
+    return status_map
+
+
 @images_router.get("/projects/{project_uuid}/images/{segment_index}")
 async def get_image(project_uuid: str, segment_index: int):
     """Retrieve an uploaded image for a segment."""

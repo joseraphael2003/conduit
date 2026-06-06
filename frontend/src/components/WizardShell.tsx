@@ -11,16 +11,11 @@ import { Step3Segments } from "@/pages/Step3Segments";
 import { Step4Images } from "@/pages/Step4Images";
 import { Step5Video } from "@/pages/Step5Video";
 import { apiBase } from "@/config";
+import { type ProjectState, isStepComplete } from "@/lib/projectState";
 
 interface WizardShellProps {
   children?: React.ReactNode;
 }
-
-interface ProjectState {
-  state: string;
-}
-
-
 
 function fallbackRender({ error, resetErrorBoundary }: FallbackProps) {
   const message = error instanceof Error ? error.message : String(error);
@@ -87,20 +82,6 @@ export function WizardShell({ children }: WizardShellProps) {
     return () => controller.abort();
   }, [uuid]);
 
-  const isStepComplete = (step: number): boolean => {
-    if (!projectState) return false;
-    const stateMap: Record<string, number> = {
-      created: 0,
-      step_1_complete: 1,
-      step_2_complete: 2,
-      step_3_complete: 3,
-      step_4_complete: 4,
-      step_5_complete: 5,
-    };
-    const completedSteps = stateMap[projectState.state] ?? 0;
-    return step <= completedSteps;
-  };
-
   const handleStep1Ready = useCallback((data: { hasTranscript: boolean; hasScript: boolean; fidelity: number | null }) => {
     setStep1Data(data);
   }, []);
@@ -155,7 +136,7 @@ export function WizardShell({ children }: WizardShellProps) {
     }
   };
 
-  const isCurrentStepComplete = isStepComplete(currentStep);
+  const isCurrentStepComplete = isStepComplete(projectState, currentStep);
   const canGoNext = currentStep === 1
     ? step1Data.hasTranscript && currentStep < 5
     : isCurrentStepComplete && currentStep < 5;

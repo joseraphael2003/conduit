@@ -1,8 +1,10 @@
+import logging
 import os
 import json
 from typing import List
 
 from fastapi import APIRouter, HTTPException, status
+from openai._exceptions import AuthenticationError, RateLimitError, APIError
 from pydantic import BaseModel
 
 from services.fireworks import FireworksClient
@@ -11,6 +13,29 @@ from models.state import ProjectState
 import routers.projects as _projects_module
 
 characters_router = APIRouter()
+
+
+def _handle_fireworks_error(exc: Exception) -> None:
+    """Map Fireworks/OpenAI exceptions to HTTPExceptions."""
+    if isinstance(exc, AuthenticationError):
+        logging.error("AI authentication failed", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI service authentication failed",
+        ) from exc
+    if isinstance(exc, RateLimitError):
+        logging.error("AI rate limited", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="AI service rate limited, retry shortly",
+        ) from exc
+    if isinstance(exc, APIError):
+        logging.error("AI request failed", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI request failed",
+        ) from exc
+    raise exc
 
 
 class CharacterDescription(BaseModel):
@@ -85,11 +110,8 @@ async def extract_characters(project_uuid: str):
             messages=[{"role": "user", "content": prompt}],
             json_schema=CharacterList,
         )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Character extraction failed",
-        ) from exc
+    except (AuthenticationError, RateLimitError, APIError) as exc:
+        _handle_fireworks_error(exc)
 
     # Save extraction result to characters.json
     project_dir = os.path.join(_projects_module.PROJECTS_BASE_DIR, project_uuid)
@@ -190,11 +212,8 @@ async def generate_prompts(project_uuid: str):
             messages=[{"role": "user", "content": prompt}],
             json_schema=CharacterPromptsList,
         )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Prompt generation failed",
-        ) from exc
+    except (AuthenticationError, RateLimitError, APIError) as exc:
+        _handle_fireworks_error(exc)
 
     # Merge prompts back into existing characters.json
     prompts_data = result

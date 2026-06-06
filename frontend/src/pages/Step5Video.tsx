@@ -62,6 +62,7 @@ export function Step5Video() {
   const hasAutoAssigned = useRef(false);
   const consoleRef = useRef<HTMLDivElement>(null);
   const lastLogCount = useRef(0);
+  const mounted = useRef(true);
 
   const missingImagesCount =
     segments.length - Object.values(imageStatuses).filter(Boolean).length;
@@ -126,27 +127,6 @@ export function Step5Video() {
     }
   }, [uuid]);
 
-  const checkImageStatus = useCallback(
-    async (segmentIndex: number) => {
-      if (!uuid) return;
-      try {
-        const response = await fetch(
-          `${apiBase}/projects/${uuid}/images/${segmentIndex}`
-        );
-        setImageStatuses((prev) => ({
-          ...prev,
-          [segmentIndex]: response.ok,
-        }));
-      } catch {
-        setImageStatuses((prev) => ({
-          ...prev,
-          [segmentIndex]: false,
-        }));
-      }
-    },
-    [uuid]
-  );
-
   useEffect(() => {
     const controller = new AbortController();
     fetchSegments(controller.signal);
@@ -154,25 +134,51 @@ export function Step5Video() {
   }, [fetchSegments]);
 
   useEffect(() => {
-    if (segments.length > 0) {
-      segments.forEach((seg) => {
-        checkImageStatus(seg.segment_index);
+    if (!uuid || segments.length === 0) return;
+
+    const controller = new AbortController();
+    fetch(`${apiBase}/projects/${uuid}/images/status`, { signal: controller.signal })
+      .then(async (response) => {
+        if (response.status === 404) {
+          setImageStatuses({});
+          return;
+        }
+        if (!response.ok) {
+          console.error(`Failed to fetch image status: ${response.status}`);
+          return;
+        }
+        const data = (await response.json()) as Record<string, boolean>;
+        const parsed: Record<number, boolean> = {};
+        for (const [key, value] of Object.entries(data)) {
+          parsed[parseInt(key, 10)] = value;
+        }
+        setImageStatuses(parsed);
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          console.error('Image status fetch failed:', err);
+        }
       });
-    }
-  }, [segments, checkImageStatus]);
+
+    return () => controller.abort();
+  }, [segments, uuid]);
 
   useEffect(() => {
     if (!generating) return;
+    mounted.current = true;
 
     const interval = setInterval(async () => {
-      if (!uuid) return;
+      if (!uuid || !mounted.current) return;
       try {
         const response = await fetch(`${apiBase}/projects/${uuid}/video/status`);
+        if (!mounted.current) return;
         if (!response.ok) return;
         const status = (await response.json()) as VideoStatus;
+        if (!mounted.current) return;
         setVideoStatus(status);
 
         if (status.message) {
+          if (!mounted.current) return;
           setConsoleOutput((prev) => {
             if (prev.length === 0 || prev[prev.length - 1] !== status.message) {
               return [...prev, status.message];
@@ -182,12 +188,18 @@ export function Step5Video() {
         }
 
         if (status.status === "completed") {
+          if (!mounted.current) return;
           setGenerating(false);
+          if (!mounted.current) return;
           setVideoComplete(true);
+          if (!mounted.current) return;
           setConsoleOutput((prev) => [...prev, "Video generation complete."]);
         } else if (status.status === "error") {
+          if (!mounted.current) return;
           setGenerating(false);
+          if (!mounted.current) return;
           setError(status.message);
+          if (!mounted.current) return;
           setConsoleOutput((prev) => [...prev, `Error: ${status.message}`]);
         }
       } catch {
@@ -197,11 +209,14 @@ export function Step5Video() {
       // Fetch ffmpeg stderr logs
       try {
         const logsResponse = await fetch(`${apiBase}/projects/${uuid}/video/logs`);
+        if (!mounted.current) return;
         if (logsResponse.ok) {
           const logsData = (await logsResponse.json()) as { lines: string[] };
+          if (!mounted.current) return;
           const lines = logsData.lines;
           const newLines = lines.slice(lastLogCount.current);
           if (newLines.length > 0) {
+            if (!mounted.current) return;
             setConsoleOutput((prev) => [...prev, ...newLines]);
             lastLogCount.current = lines.length;
           }
@@ -211,7 +226,10 @@ export function Step5Video() {
       }
     }, 2000);
 
-    return () => clearInterval(interval);
+    return () => {
+      mounted.current = false;
+      clearInterval(interval);
+    };
   }, [generating, uuid]);
 
   useEffect(() => {

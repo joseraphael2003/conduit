@@ -1,6 +1,6 @@
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, status
@@ -33,7 +33,7 @@ def _write_video_error(uuid: str, message: str) -> None:
         except (json.JSONDecodeError, OSError):
             data = {}
         data["video_error"] = message
-        data["updated_at"] = datetime.utcnow().isoformat()
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
         try:
             with open(state_json_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
@@ -51,7 +51,7 @@ def _clear_video_error(uuid: str) -> None:
         except (json.JSONDecodeError, OSError):
             data = {}
         data.pop("video_error", None)
-        data["updated_at"] = datetime.utcnow().isoformat()
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
         try:
             with open(state_json_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)

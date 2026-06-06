@@ -2,7 +2,7 @@ import os
 import json
 import shutil
 import uuid as uuid_module
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, status, Response, UploadFile, File
 from models.project import ProjectCreate, ProjectResponse, ProjectListResponse
 from models.database import get_db
@@ -29,7 +29,7 @@ def create_project_directory(project_uuid: str) -> None:
 
     project_metadata = {
         "uuid": project_uuid,
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
     project_json_path = os.path.join(conduit_dir, "project.json")
     with open(project_json_path, "w", encoding="utf-8") as f:
@@ -38,7 +38,7 @@ def create_project_directory(project_uuid: str) -> None:
     state_metadata = {
         "uuid": project_uuid,
         "state": "created",
-        "updated_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     state_json_path = os.path.join(conduit_dir, "state.json")
     with open(state_json_path, "w", encoding="utf-8") as f:
@@ -49,7 +49,7 @@ def create_project_directory(project_uuid: str) -> None:
 async def create_project(project: ProjectCreate):
     """Create a new project with auto-generated UUID and directory tree."""
     project_uuid = str(uuid_module.uuid4())
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     db = await get_db()
     try:

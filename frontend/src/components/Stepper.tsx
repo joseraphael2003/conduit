@@ -6,11 +6,7 @@ import {
   Image,
   FilmStrip,
 } from "@phosphor-icons/react";
-
-
-interface ProjectState {
-  state: string;
-}
+import { type ProjectState, isStepComplete } from "@/lib/projectState";
 
 interface StepperProps {
   currentStep: number;
@@ -27,29 +23,14 @@ const steps = [
 ];
 
 export function Stepper({ currentStep, projectState, onStepClick }: StepperProps) {
-
-  const isStepComplete = (step: number): boolean => {
-    if (!projectState) return false;
-    const stateMap: Record<string, number> = {
-      created: 0,
-      step_1_complete: 1,
-      step_2_complete: 2,
-      step_3_complete: 3,
-      step_4_complete: 4,
-      step_5_complete: 5,
-    };
-    const completedSteps = stateMap[projectState.state] ?? 0;
-    return step <= completedSteps;
-  };
-
   return (
     <>
       {steps.map((step, index) => {
         const stepNumber = index + 1;
         const isActive = stepNumber === currentStep;
-        const isCompleted = isStepComplete(stepNumber);
+        const isCompleted = isStepComplete(projectState, stepNumber);
         const isPending = !isActive && !isCompleted;
-        const isClickable = stepNumber <= currentStep || (stepNumber === currentStep + 1 && isStepComplete(currentStep));
+        const isClickable = stepNumber <= currentStep || (stepNumber === currentStep + 1 && isStepComplete(projectState, currentStep));
 
         const Icon = step.icon;
 

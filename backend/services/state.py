@@ -1,6 +1,6 @@
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import HTTPException, status
 from models.database import get_db
 from models.state import ProjectState
@@ -87,7 +87,7 @@ async def update_state(uuid: str, new_state: ProjectState) -> ProjectState:
         with open(state_json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         data["state"] = new_state.value
-        data["updated_at"] = datetime.utcnow().isoformat()
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
         with open(state_json_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
@@ -116,7 +116,7 @@ def set_sub_step_state(uuid: str, key: str, value) -> None:
     with open(state_json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     data[key] = value
-    data["updated_at"] = datetime.utcnow().isoformat()
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
     with open(state_json_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
@@ -186,7 +186,7 @@ async def invalidate_downstream(uuid: str, edited_step: int) -> ProjectState:
         with open(state_json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         data["state"] = new_state.value
-        data["updated_at"] = datetime.utcnow().isoformat()
+        data["updated_at"] = datetime.now(timezone.utc).isoformat()
         data = _clear_sub_step_state(data, edited_step)
         with open(state_json_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
