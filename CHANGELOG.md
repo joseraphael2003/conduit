@@ -36,6 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.1] — 2026-06-06 — Follow-up Fixes
+
+### Security
+- **Fix exception leak in `images.py`** (`backend/routers/images.py:89`) — Replaced `detail=f"Invalid image file: {exc}"` with generic `detail="Invalid image file — please upload a valid PNG"`. Added `logging.error("Image validation failed", exc_info=exc)` for full server-side logging. This was the last remaining `str(exc)` leak in the backend.
+
+### Fixed
+- **Sync `package.json` version** (`frontend/package.json`) — Bumped `0.5.0` → `0.6.0` to match the `[0.6.0]` release tag.
+
+---
+
 ## [0.5.0] — 2026-06-06 — Session A: Safety & Async Fixes
 
 ### Security
