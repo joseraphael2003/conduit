@@ -84,9 +84,10 @@ async def upload_image(project_uuid: str, segment_index: int, file: UploadFile =
     try:
         image = Image.open(BytesIO(content))
     except Exception as exc:
+        logging.error("Image validation failed", exc_info=exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid image file: {exc}",
+            detail="Invalid image file — please upload a valid PNG",
         )
 
     # Validate format is PNG
