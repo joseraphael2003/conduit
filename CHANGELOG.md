@@ -5,6 +5,37 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-06-06 — Session B: Refactoring, Performance & DRY
+
+### Backend Refactoring
+- **H10 — Timezone-aware datetimes** (`backend/routers/projects.py`, `video.py`, `services/ffmpeg.py`, `services/state.py`) — Replaced deprecated `datetime.utcnow()` with `datetime.now(timezone.utc)` at 9 sites. All timestamps now emit `+00:00` suffix.
+- **H4 + H5 — Single source of truth for motion effects** (`backend/services/effects.py`, `backend/services/ffmpeg.py`) — `effects.py` now owns all effect parameters and `build_zoompan_filter()` expressions. `ffmpeg.py:generate_segment_clip` removed its 7-way `if/elif` duplication and delegates to `effects.build_zoompan_filter()`. Reconciled pan speed to `±2` (DESIGN_SPEC Appendix A). Verified all 6 effects render 1920×1080 at 24fps.
+- **H6 — Batch image-status endpoint** (`backend/routers/images.py`) — Added `GET /api/v1/projects/{uuid}/images/status` returning `{ "<segment_index>": bool }`. Reuses `_load_segments` and `_get_image_path`. Returns 404 for missing project, `{}` for empty segments.
+- **M9 — Typed, non-leaking AI error handling** (`backend/routers/characters.py`, `backend/routers/segments.py`) — Replaced `except Exception` with typed handlers: `AuthenticationError`→502, `RateLimitError`→429, `APIError`→502. Extracted `_handle_fireworks_error()` helper to eliminate duplication. Removed all `detail=f"...: {exc}"` interpolation. Full exceptions logged server-side via `logging`.
+- **H14 + M8 + H13-doc** (`backend/main.py`) — Narrowed CORS `allow_headers` from `["*"]` to `["Content-Type"]`. Added `await models.database.init_db()` in startup handler. Documented H13 (rate limiting) as deliberate won't-fix for single-user localhost.
+
+### Frontend Refactoring
+- **M1 — Shared ProjectState type** (`frontend/src/lib/projectState.ts`, `frontend/src/components/WizardShell.tsx`, `frontend/src/components/Stepper.tsx`) — Extracted `ProjectStateValue` strict union type and `isStepComplete()` helper. Eliminated duplicated `stateMap`/`isStepComplete` logic in both components.
+- **M6 — Button radius compliance** (`frontend/src/components/ui/button.tsx`) — Removed all `rounded-*` and `rounded-[...]` classes from base `cva` string and size variants. Component now complies with DESIGN.md (0px border radius everywhere).
+- **M7 — Version bump** (`frontend/package.json`) — Bumped version from `0.0.0` to `0.5.0`.
+- **M2 + M4 + M5 — Playwright test hygiene** (`frontend/tests/utils.ts`, 8 spec files) — Extracted `injectStyles(page: Page)` and `isBackendRunning()` (fetch-based) to shared utils. Replaced all `page: any` with typed `Page`. Replaced `execSync('curl ...')` with `fetch`-based health check. Added `"node"` to `tests/tsconfig.json` types.
+- **H6 — Batch image status adoption** (`frontend/src/pages/Step4Images.tsx`, `frontend/src/pages/Step5Video.tsx`) — Replaced per-segment `checkImageStatus` loops with single `GET /images/status` call. Preserved thumbnail rendering via per-segment `GET /images/{index}`. Added AbortController hygiene and floating-promise `.catch` pattern.
+- **H9 — Unmount-safe polling** (`frontend/src/pages/Step5Video.tsx`) — Added `mounted` ref (`useRef(true)`) and guards every `setState` inside the 2s polling `setInterval` callback. Cleanup sets `mounted.current = false` before `clearInterval`. Prevents "setState on unmounted component" warnings.
+
+### Testing
+- **Backend Tests:** 114 tests (up from 102 in Session A) — 12 new tests: 4 for batch image-status endpoint, 8 for typed error handling (AuthError + RateLimit in characters/segments extract/prompts/breakdown)
+- **Frontend Tests:** 73 tests (down from 75 due to 3 backend-required tests skipped) — All passing with batch endpoint mocks
+- **TypeScript:** `npx tsc --noEmit` → 0 errors
+- **Build:** `npm run build` → success
+
+### Fixed
+- **F-B Review findings:** Removed dead `_ensure_step_2_complete` function from `segments.py`. Extracted `_handle_fireworks_error()` to eliminate duplicated exception triplet in `characters.py` and `segments.py`. Replaced `request: any` with `request: APIRequestContext` in `e2e-error-paths.spec.ts`.
+
+### Pre-existing Issue (not in Session B scope)
+- **Exception leak in `images.py`** — `backend/routers/images.py:89` contains `detail=f"Invalid image file: {exc}"` which leaks the raw exception string to the client. This violates the architecture rule "Never return `str(exc)` to the client." Recommended for follow-up cleanup.
+
+---
+
 ## [0.5.0] — 2026-06-06 — Session A: Safety & Async Fixes
 
 ### Security
