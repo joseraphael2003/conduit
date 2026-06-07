@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import Request
@@ -12,7 +14,15 @@ load_dotenv()
 from routers import router
 import models.database
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await models.database.init_db()
+    openai_api_key = os.environ.get("OPENAI_API_KEY")
+    if not openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is required")
+    yield
+
+app = FastAPI(lifespan=lifespan)
 logger = logging.getLogger(__name__)
 
 # CORS middleware
@@ -39,14 +49,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Conduit is a single-user localhost app (no public exposure, no auth).
 # Per DESIGN_SPEC §2/§11, rate limiting is unnecessary and out of scope.
 # If the deployment model ever changes, add a reverse proxy or rate-limiter.
-
-# Startup validation
-@app.on_event("startup")
-async def startup():
-    await models.database.init_db()
-    openai_api_key = os.environ.get("OPENAI_API_KEY")
-    if not openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY is required")
 
 # Health endpoint
 @app.get("/health")

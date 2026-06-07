@@ -216,8 +216,6 @@ def build_segment_prompts_messages(
         "You are generating image prompts for an AI image generator (Gemini/Flow).\n\n"
         "For each segment, read the script line and the character profiles.\n"
         "Generate a vivid, detailed image generation prompt.\n\n"
-        "## Input Context\n\n"
-        "<characters>\n{character_profiles}\n</characters>\n\n"
         "## Output Format\n\n"
         "For each segment, output:\n"
         "- segment_index: int\n"

@@ -139,18 +139,23 @@ All LLM calls use **structured outputs** (`json_schema` / Pydantic response mode
 projects/{uuid}/
 ├── voiceover.mp3
 ├── original_script.md       # Optional
-├── words.json               # Whisper word-level timestamps
+├── transcript.json
 ├── transcript_raw.txt
-├── source_of_truth_script.txt
+├── words.json               # Whisper word-level timestamps (also mirrored in .conduit/)
 ├── characters.json
-├── segments.json
 ├── captions.srt
 ├── captions.ass             # Optional, generated if captions burned
 ├── images/
 │   ├── 0001.png
 │   └── ...
-└── output/
-    └── output.mp4
+├── output/
+│   └── output.mp4
+└── .conduit/
+    ├── project.json
+    ├── state.json
+    ├── source_of_truth_script.txt
+    ├── words.json
+    └── segments.json
 ```
 
 ---

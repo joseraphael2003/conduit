@@ -429,10 +429,10 @@ async def test_generate_prompts_success(async_client, cleanup_projects, temp_pro
     # Create characters.json
     characters = {
         "characters": [
-            {"name": "Alice", "type": "protagonist", "importance": "main", "description": "A curious girl"}
+            {"name": "Alice", "type": "speaking", "importance": "major", "description": "A curious girl"}
         ]
     }
-    with open(os.path.join(conduit_dir, "characters.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(temp_projects_dir, project_uuid, "characters.json"), "w", encoding="utf-8") as f:
         json.dump(characters, f)
 
     with respx.mock:
@@ -645,8 +645,8 @@ async def test_generate_prompts_batch_fallback(async_client, cleanup_projects, t
     with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
         json.dump(segments, f)
 
-    characters = {"characters": [{"name": "Alice", "type": "protagonist", "importance": "main", "description": "A girl"}]}
-    with open(os.path.join(conduit_dir, "characters.json"), "w", encoding="utf-8") as f:
+    characters = {"characters": [{"name": "Alice", "type": "speaking", "importance": "major", "description": "A girl"}]}
+    with open(os.path.join(temp_projects_dir, project_uuid, "characters.json"), "w", encoding="utf-8") as f:
         json.dump(characters, f)
 
     call_count = 0

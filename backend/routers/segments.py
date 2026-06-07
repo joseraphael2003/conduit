@@ -413,7 +413,7 @@ async def generate_segment_prompts(uuid: str):
 
     conduit_dir = _get_conduit_dir(uuid)
     segments_path = os.path.join(conduit_dir, "segments.json")
-    characters_path = os.path.join(conduit_dir, "characters.json")
+    characters_path = os.path.join(_get_project_dir(uuid), "characters.json")
 
     if not os.path.exists(segments_path):
         raise HTTPException(

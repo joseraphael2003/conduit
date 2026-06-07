@@ -5,6 +5,21 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] — 2026-06-07 — Post-0.7.0 Deviation Fixes
+
+### Fixed
+- **`segments.py` now reads `characters.json` from the project root** (`backend/routers/segments.py:416`) — Fixes silent loss of character context in segment prompts. The writer (`characters.py`) always saved to the project root, but the reader was looking in `.conduit/`, causing Pass 2 to build prompts with empty character data. Hardened regression test (`test_generate_prompts_success`) asserts the request body contains `"Alice"`.
+- **Removed unfilled `{character_profiles}` block** from the Pass 2 system prompt (`backend/services/prompts.py`) — The placeholder was never hydrated, so the AI received a literal template string. Deleted the paragraph and updated `test_prompts.py` assertions to verify its absence.
+- **Synced `frontend/package.json` to 0.7.0** (`frontend/package.json`) — Version drifted to `0.6.0` after the `[0.7.0]` release tag.
+- **Migrated `main.py` to a FastAPI lifespan handler** (`backend/main.py`) — Replaced deprecated `@app.on_event("startup")` with `@asynccontextmanager async def lifespan(...)`. Eliminates the `on_event` DeprecationWarning; startup order (`init_db()` → `OPENAI_API_KEY` check) unchanged.
+- **Corrected AGENTS.md Data Files diagram** — Updated the `.conduit/` layout to reflect real backend paths: `project.json`, `state.json`, `source_of_truth_script.txt`, `words.json`, `segments.json` live under `.conduit/`; `characters.json`, `images/`, `output/`, voiceover, transcripts, and captions live at the project root. Added `transcript.json` to root (was missing). Noted `words.json` is mirrored in `.conduit/`.
+
+### Testing
+- **Backend tests:** 149 backend tests passed (up from 148, +1 from `test_prompts.py` no-placeholder assertion).
+- **Frontend:** `npx tsc --noEmit` → 0 errors.
+
+---
+
 ## [0.7.0] — 2026-06-07 — Prompt Accuracy Fix + Style Abstraction
 
 ### Prompt Accuracy
@@ -34,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Field rename** — `turnaround_reference_prompt` → `turnaround_prompt` (pre-existing bug where backend wrote `turnaround_prompt` but frontend read the wrong field name).
 
 ### Testing
-- **Backend tests:** 148 passed (up from 146) — `test_schema_flatten.py` (2), `test_prompts.py` (28), `test_style_state.py` (2), plus updated `test_characters.py` (16) with system/user split assertions, two-batch Call 2 `side_effect`, 502 guard for invalid enums, 502 guard for name mismatch.
+- **Backend tests:** 148 backend tests passed (up from 114 at 0.6.0): +28 `test_prompts`, +2 `test_schema_flatten`, +2 `test_style_state`, plus `test_characters` 8→16 and `test_segments` 14→18.
 - **Frontend:** `npx tsc --noEmit` → 0 errors.
 - **Greps verified:** no "helpful assistant", no legacy enums, no schemas in routers.
 

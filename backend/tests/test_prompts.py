@@ -242,6 +242,15 @@ def test_segment_prompts_system_contains_shot_types():
         assert shot in system, f"SHOT_TYPE '{shot}' missing from system prompt"
 
 
+def test_segment_prompts_system_no_character_profiles_placeholder():
+    style = STYLES["secret_level"]
+    segments = [{"segment_index": 1, "script_line": "Alice walks."}]
+    characters = [{"name": "Alice", "description": "Brave knight."}]
+    messages = build_segment_prompts_messages(segments, characters, style)
+    system = messages[0]["content"]
+    assert "{character_profiles}" not in system
+
+
 def test_segment_prompts_system_contains_examples_and_rules():
     style = STYLES["secret_level"]
     segments = [{"segment_index": 1, "script_line": "Alice walks."}]
