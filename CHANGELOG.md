@@ -5,6 +5,44 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-06-07 — Prompt Accuracy Fix + Style Abstraction
+
+### Prompt Accuracy
+- **All four AI prompts rewritten to match `DESIGN_SPEC.md`** (`backend/services/prompts.py`) — Replaced bare-bones stubs with spec-compliant system prompts:
+  - **Call 1 (character extraction)** — §4.1: "character extraction engine" role, `speaking|creature|npc_entity` type enum, `major|minor` importance enum, detailed-visual-infer-if-blank description rule, `<system>`+`<script>` XML split.
+  - **Call 2 (character prompts)** — §4.2: Two batch calls (front profile + turnaround) with verbatim style anchors from "Secret Level / Love Death and Robots" style, merge-by-name guard, 2–4 line comma-separated rule, no anime/cel-shading prohibition.
+  - **Pass 1 (segment breakdown)** — §5.2: "video editor" role, 8 explicit break rules (visual beats, sentence merging, scene transitions, pause ≥1.5s, 3–10s target duration), `<system>`+`<script>`+`<word_timestamps>` XML split.
+  - **Pass 2 (segment prompts)** — §5.2: "scene director" role, 9 prompt construction rules (style anchor, scene description, character placement, camera/framing, color palette, negative constraints, 3–6 line length, `@Name` references, cross-segment consistency), good/bad examples, shot-type vocabulary.
+- **No "helpful assistant" in production code** — All system messages now have specific AI roles (extraction engine, art prompt writer, video editor, scene director).
+- **No legacy enums** — `protagonist/antagonist/supporting/main` removed from all prompt and schema code.
+
+### Style Abstraction
+- **`StyleProfile` registry** (`backend/services/prompts.py`) — `@dataclass(frozen=True)` with fields: `id`, `display_name`, `art_role_phrase`, `front_profile_anchor`, `turnaround_anchor`, `segment_scene_anchor`, `prohibitions`, `negative_style_example`. Seeded with ONE entry `"secret_level"`.
+- **`STYLES` dict + `get_style()`** — Lookup by `style_id` with fallback to `DEFAULT_STYLE_ID` ("secret_level"). Adding a new style = one registry entry.
+- **`SHOT_TYPES` vocabulary** — 12 shot types: extreme wide, wide, medium, close-up, extreme close-up, over-the-shoulder, Dutch angle, bird's eye, worm's eye, POV, establishing shot, aerial/drone. Referenced in Pass 2 system prompt as prose guidance (not structured field).
+- **`style_id` persistence** — `get_style_id(uuid)` reads `state.json` (default "secret_level"). Backward-compatible for existing projects without key.
+
+### Architecture
+- **`backend/models/characters.py`** — New `CharacterDescription`, `CharacterList`, `CharacterPrompts`, `CharacterPromptsList`, `FrontProfilePromptList`, `TurnaroundPromptList` with `Literal` enum enforcement.
+- **`backend/models/segments.py`** — New `SegmentBreakdown`, `Segments`, `SegmentPrompt`, `SegmentPrompts`, `SplitRequest`, `SegmentEffectUpdate` (moved from routers).
+- **`backend/services/prompts.py`** — Central home for all 4 prompt texts. 5 message builders returning `list[dict]` system+user messages. No import from `models/` or `routers/` (cycle-free).
+- **`validate-before-persist` guard** — `CharacterList(**result)` is parsed BEFORE writing `characters.json`. `ValidationError` → `HTTPException(502, "AI returned data in an unexpected format")` (generic, no `str(exc)` leak).
+- **`_handle_fireworks_error` preserved** — Existing error mapping (AuthError→502, RateLimit→429, APIError→502) unchanged.
+
+### Frontend
+- **Enum alignment** (`frontend/src/pages/Step2Characters.tsx`) — `type` enum updated to `speaking|creature|npc_entity`, `importance` to `major|minor`. Badge conditionals fixed.
+- **Field rename** — `turnaround_reference_prompt` → `turnaround_prompt` (pre-existing bug where backend wrote `turnaround_prompt` but frontend read the wrong field name).
+
+### Testing
+- **Backend tests:** 148 passed (up from 146) — `test_schema_flatten.py` (2), `test_prompts.py` (28), `test_style_state.py` (2), plus updated `test_characters.py` (16) with system/user split assertions, two-batch Call 2 `side_effect`, 502 guard for invalid enums, 502 guard for name mismatch.
+- **Frontend:** `npx tsc --noEmit` → 0 errors.
+- **Greps verified:** no "helpful assistant", no legacy enums, no schemas in routers.
+
+### Guardrails Honored
+- No style selector UI, no anime/other styles, no `shot_type` structured field, no SQLite migration, no batch-fallback strategy change.
+
+---
+
 ## [0.6.1] — 2026-06-06 — Follow-up Fixes
 
 ### Security
