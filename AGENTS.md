@@ -141,7 +141,6 @@ projects/{uuid}/
 ├── original_script.md       # Optional
 ├── transcript.json
 ├── transcript_raw.txt
-├── words.json               # Whisper word-level timestamps (also mirrored in .conduit/)
 ├── characters.json
 ├── captions.srt
 ├── captions.ass             # Optional, generated if captions burned

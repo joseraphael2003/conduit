@@ -382,3 +382,132 @@ async def test_get_project_not_found(async_client, cleanup_projects):
     fake_uuid = "00000000-0000-0000-0000-000000000000"
     response = await async_client.get(f"/api/v1/projects/{fake_uuid}")
     assert response.status_code == 404, f"Expected 404, got {response.status_code}: {response.text}"
+
+
+@pytest.mark.asyncio
+async def test_voiceover_reupload_preserves_outputs(async_client, cleanup_projects, temp_projects_dir):
+    """Re-uploading voiceover preserves captions.srt and words.json, clears downstream segments.json."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Reupload Test"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    fake_mp3 = b"\xff\xfb\x90\x00"
+
+    # First upload with mocked Whisper
+    with respx.mock:
+        respx.post("https://api.openai.com/v1/audio/transcriptions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "text": "Hello world",
+                    "words": [
+                        {"word": "Hello", "start": 0.0, "end": 0.5},
+                        {"word": "world", "start": 0.6, "end": 1.0},
+                    ],
+                },
+            )
+        )
+        resp1 = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/voiceover",
+            files={"file": ("voiceover.mp3", fake_mp3, "audio/mpeg")},
+        )
+        assert resp1.status_code == 202, f"First upload failed: {resp1.text}"
+
+    # Verify state after first upload
+    state_resp1 = await async_client.get(f"/api/v1/projects/{project_uuid}")
+    assert state_resp1.json()["state"] == "step_1_complete"
+
+    # Pre-stage downstream files
+    project_dir = os.path.join(temp_projects_dir, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    os.makedirs(conduit_dir, exist_ok=True)
+    segments_path = os.path.join(conduit_dir, "segments.json")
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump({"segments": []}, f)
+
+    state_module.set_sub_step_state(project_uuid, "step_2_call_1_complete", True)
+
+    # Re-upload with mocked Whisper
+    with respx.mock:
+        respx.post("https://api.openai.com/v1/audio/transcriptions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "text": "Hello again",
+                    "words": [
+                        {"word": "Hello", "start": 0.0, "end": 0.5},
+                        {"word": "again", "start": 0.6, "end": 1.0},
+                    ],
+                },
+            )
+        )
+        resp2 = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/voiceover",
+            files={"file": ("voiceover.mp3", fake_mp3, "audio/mpeg")},
+        )
+        assert resp2.status_code == 202, f"Re-upload failed: {resp2.text}"
+
+    # Assert after second upload
+    captions_path = os.path.join(project_dir, "captions.srt")
+    words_path = os.path.join(conduit_dir, "words.json")
+    assert os.path.exists(captions_path), "captions.srt should be preserved after re-upload"
+    assert os.path.exists(words_path), ".conduit/words.json should be preserved after re-upload"
+    assert not os.path.exists(segments_path), ".conduit/segments.json should be deleted (downstream cleared)"
+    state_resp2 = await async_client.get(f"/api/v1/projects/{project_uuid}")
+    assert state_resp2.json()["state"] == "step_1_complete"
+
+
+@pytest.mark.asyncio
+async def test_invalidate_downstream_step_1(async_client, cleanup_projects, temp_projects_dir):
+    """Invalidate from Step 1 resets state to created, deletes captions.srt and segments.json, preserves images, clears sub-steps."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Cascade Step 1"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    # Advance to step_1_complete
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+
+    # Set up sub-step state
+    state_module.set_sub_step_state(project_uuid, "step_2_call_1_complete", True)
+    state_module.set_sub_step_state(project_uuid, "step_3_pass_1_complete", True)
+
+    # Stage files
+    project_dir = os.path.join(temp_projects_dir, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    os.makedirs(conduit_dir, exist_ok=True)
+
+    captions_path = os.path.join(project_dir, "captions.srt")
+    with open(captions_path, "w", encoding="utf-8") as f:
+        f.write("1\n00:00:00,000 --> 00:00:01,000\nHello\n")
+
+    words_path = os.path.join(conduit_dir, "words.json")
+    with open(words_path, "w", encoding="utf-8") as f:
+        json.dump({"words": []}, f)
+
+    segments_path = os.path.join(conduit_dir, "segments.json")
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump({"segments": []}, f)
+
+    images_dir = os.path.join(project_dir, "images")
+    os.makedirs(images_dir, exist_ok=True)
+    image_path = os.path.join(images_dir, "0001.png")
+    with open(image_path, "wb") as f:
+        f.write(b"fake_image")
+
+    # Invalidate Step 1
+    result = await state_module.invalidate_downstream(project_uuid, 1)
+    assert result.value == "created"
+
+    # Verify captions.srt deleted
+    assert not os.path.exists(captions_path)
+
+    # Verify segments.json deleted
+    assert not os.path.exists(segments_path)
+
+    # Verify image preserved
+    assert os.path.exists(image_path)
+
+    # Verify sub-steps cleared
+    sub_state = state_module.get_sub_step_state(project_uuid)
+    assert sub_state.get("step_2_call_1_complete") is None
+    assert sub_state.get("step_3_pass_1_complete") is None

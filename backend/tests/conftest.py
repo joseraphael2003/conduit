@@ -13,14 +13,16 @@ import models.database
 # Now import app
 from main import app
 
-# Patch projects base dir in routers.projects, services.state, and routers.segments
+# Patch projects base dir in routers.projects, services.state, routers.segments, and services.srt
 import routers.projects as projects_module
 import services.state as state_module
 import routers.segments as segments_module
+import services.srt as srt_module
 
 _original_projects_base = projects_module.PROJECTS_BASE_DIR
 _original_state_base = state_module.PROJECTS_BASE_DIR
 _original_segments_base = segments_module.PROJECTS_BASE_DIR
+_original_srt_base = srt_module.PROJECTS_BASE_DIR
 
 
 @pytest_asyncio.fixture
@@ -30,10 +32,12 @@ async def temp_projects_dir():
     projects_module.PROJECTS_BASE_DIR = temp_dir
     state_module.PROJECTS_BASE_DIR = temp_dir
     segments_module.PROJECTS_BASE_DIR = temp_dir
+    srt_module.PROJECTS_BASE_DIR = temp_dir
     yield temp_dir
     projects_module.PROJECTS_BASE_DIR = _original_projects_base
     state_module.PROJECTS_BASE_DIR = _original_state_base
     segments_module.PROJECTS_BASE_DIR = _original_segments_base
+    srt_module.PROJECTS_BASE_DIR = _original_srt_base
     shutil.rmtree(temp_dir, ignore_errors=True)
 
 

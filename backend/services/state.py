@@ -135,10 +135,7 @@ def _delete_downstream_files(project_dir: str, edited_step: int) -> None:
     """Delete downstream JSON files when invalidating from a step."""
     # Step 1 specific files
     if edited_step <= 1:
-        words_path = os.path.join(project_dir, "words.json")
         captions_path = os.path.join(project_dir, "captions.srt")
-        if os.path.exists(words_path):
-            os.remove(words_path)
         if os.path.exists(captions_path):
             os.remove(captions_path)
 

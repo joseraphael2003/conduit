@@ -5,6 +5,19 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] — 2026-06-07 — Re-upload Invalidation Fix
+
+### Fixed
+- Fixed voiceover re-upload deleting freshly-generated `captions.srt` by invalidating downstream BEFORE re-transcription. Previously the invalidation ran after the new files were written, causing the SRT to be immediately deleted — breaking caption download and burn.
+- Removed dead duplicate root `words.json` (canonical copy now lives only at `.conduit/words.json`). No reader ever accessed the root copy.
+
+### Added
+- Real `/voiceover` re-upload regression test: asserts `captions.srt` survives a second upload while `.conduit/segments.json` is correctly cleared.
+- Direct `invalidate_downstream(1)` test documenting the standalone Step 1 deletion semantics.
+
+### Testing
+- 149 backend tests passed (0 failures), 73 frontend tests passed, tsc 0 errors.
+
 ## [0.7.1] — 2026-06-07 — Post-0.7.0 Deviation Fixes
 
 ### Fixed
@@ -778,17 +791,18 @@ frontend/components.json
 | **v0.5.0** | 102 | 73 | 175 |
 | **v0.6.0** | 114 | 73 | 187 |
 | **v0.7.0** | 148 | 73* | 221 |
+| **v0.7.1** | 149 | 73* | 222 |
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.7.0 — 148 tests)
+### Backend Test Breakdown (v0.7.1 — 149 tests)
 - `test_fireworks.py` — 9 tests (client, base_url, retry logic, json_schema, error handling)
 - `test_characters.py` — 16 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT)
 - `test_segments.py` — 18 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions)
 - `test_images.py` — 13 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status)
 - `test_projects.py` — 13 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript)
 - `test_video.py` — 47 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters)
-- `test_prompts.py` — 28 tests (StyleProfile injection, 5 builders' anchors/rules, SHOT_TYPES, get_style fallback)
+- `test_prompts.py` — 29 tests (StyleProfile injection, 5 builders' anchors/rules, SHOT_TYPES, get_style fallback, Pass 2 no-placeholder assertion)
 - `test_schema_flatten.py` — 2 tests (enum survives `_flatten_schema`, Pydantic rejects bad enum)
 - `test_style_state.py` — 2 tests (style_id persisted on create, `get_style_id` default fallback)
 

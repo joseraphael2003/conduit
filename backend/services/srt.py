@@ -122,19 +122,13 @@ def save_transcription_files(
     """Save all transcription output files to project directory.
 
     Saves:
-      - words.json
       - captions.srt
       - transcript_raw.txt
       - .conduit/source_of_truth_script.txt
+      - .conduit/words.json
     """
     project_dir = os.path.join(PROJECTS_BASE_DIR, uuid)
     os.makedirs(project_dir, exist_ok=True)
-
-    # Save words.json with a "words" key (expected by downstream steps)
-    words_data = {"words": words}
-    words_path = os.path.join(project_dir, "words.json")
-    with open(words_path, "w", encoding="utf-8") as f:
-        json.dump(words_data, f, indent=2)
 
     srt_path = os.path.join(project_dir, "captions.srt")
     with open(srt_path, "w", encoding="utf-8") as f:
@@ -151,6 +145,7 @@ def save_transcription_files(
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(transcript)
 
+    words_data = {"words": words}
     words_conduit_path = os.path.join(conduit_dir, "words.json")
     with open(words_conduit_path, "w", encoding="utf-8") as f:
         json.dump(words_data, f, indent=2)

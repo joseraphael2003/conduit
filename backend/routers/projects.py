@@ -233,6 +233,13 @@ async def upload_voiceover(project_uuid: str, file: UploadFile = File(...)):
     with open(voiceover_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
+    # Invalidate downstream BEFORE re-transcription
+    current_state = await get_state(project_uuid)
+    current_idx = get_state_index(current_state)
+    target_idx = get_state_index(ProjectState.STEP_1_COMPLETE)
+    if current_idx >= target_idx:
+        await invalidate_downstream(project_uuid, 1)
+
     # Transcription pipeline
     file_size = os.path.getsize(voiceover_path)
     if file_size > 25_000_000:
@@ -264,14 +271,6 @@ async def upload_voiceover(project_uuid: str, file: UploadFile = File(...)):
 
     # Save other transcription files
     save_transcription_files(project_uuid, words, srt_content, transcript_text)
-
-    # Update state to step_1_complete
-    current_state = await get_state(project_uuid)
-    current_idx = get_state_index(current_state)
-    target_idx = get_state_index(ProjectState.STEP_1_COMPLETE)
-
-    if current_idx >= target_idx:
-        await invalidate_downstream(project_uuid, 1)
 
     await update_state(project_uuid, ProjectState.STEP_1_COMPLETE)
 
