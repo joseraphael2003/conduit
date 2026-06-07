@@ -5,18 +5,6 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.1] — 2026-06-07 — Prompt Accuracy + Style Abstraction (Atlas Verified)
-
-### Verified
-- **Atlas execution orchestration** — 4-wave verification completed with all 4 reviewers APPROVED (F1–F4).
-  - **F1 — Plan Compliance:** No "helpful assistant" in production code; no legacy enums (`protagonist`/`antagonist`/`supporting`/`main`); schemas moved out of routers; `services/prompts.py` exists.
-  - **F2 — Code Quality:** No import cycles in `prompts.py` (no router/model imports); no `str(exc)` leakage; builders return pure `list[dict]`.
-  - **F3 — Real QA:** 148 backend tests passed (0 failures); `npx tsc --noEmit` → 0 errors.
-  - **F4 — Scope Fidelity:** No style selector UI, no anime styles, no `shot_type` structured field, no SQLite migration, no batch-fallback strategy change.
-- **Test counts confirmed:** 148 backend + 73 frontend = 221 total tests.
-
----
-
 ## [0.7.0] — 2026-06-07 — Prompt Accuracy Fix + Style Abstraction
 
 ### Prompt Accuracy
