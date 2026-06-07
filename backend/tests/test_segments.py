@@ -91,6 +91,8 @@ async def test_breakdown_segments(async_client, cleanup_projects, temp_projects_
         # Assert the prompt contains both script and word timestamps
         request = route.calls.last.request
         body = json.loads(request.content)
+        assert body["messages"][0]["role"] == "system"
+        assert "video editor" in body["messages"][0]["content"]
         prompt = body["messages"][1]["content"]
         assert "Hello world. This is a test." in prompt
         assert "Hello" in prompt
@@ -488,6 +490,11 @@ async def test_generate_prompts_success(async_client, cleanup_projects, temp_pro
         # Assert prompt contains both segments and characters
         request = route.calls.last.request
         body = json.loads(request.content)
+        assert body["messages"][0]["role"] == "system"
+        assert "scene director" in body["messages"][0]["content"]
+        assert "Cinematic wide shot, photorealistic 3D render" in body["messages"][0]["content"]
+        assert "no text, no watermark" in body["messages"][0]["content"]
+        assert "over-the-shoulder" in body["messages"][0]["content"]
         prompt = body["messages"][1]["content"]
         assert "Hello world." in prompt
         assert "Alice" in prompt
