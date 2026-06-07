@@ -1,14 +1,27 @@
 import logging
 import os
 import json
-from typing import List
 
 from fastapi import APIRouter, HTTPException, status
 from openai._exceptions import AuthenticationError, RateLimitError, APIError
-from pydantic import BaseModel
+from pydantic import ValidationError
 
+from models.characters import (
+    CharacterDescription,
+    CharacterList,
+    CharacterPrompts,
+    CharacterPromptsList,
+    FrontProfilePromptList,
+    TurnaroundPromptList,
+)
 from services.fireworks import FireworksClient
-from services.state import get_state, update_state
+from services.prompts import (
+    build_character_extraction_messages,
+    build_front_profile_messages,
+    build_turnaround_messages,
+    get_style,
+)
+from services.state import get_state, update_state, get_style_id
 from models.state import ProjectState
 import routers.projects as _projects_module
 
@@ -36,27 +49,6 @@ def _handle_fireworks_error(exc: Exception) -> None:
             detail="AI request failed",
         ) from exc
     raise exc
-
-
-class CharacterDescription(BaseModel):
-    name: str
-    type: str
-    importance: str
-    description: str
-
-
-class CharacterList(BaseModel):
-    characters: List[CharacterDescription]
-
-
-class CharacterPrompts(BaseModel):
-    name: str
-    front_profile_prompt: str
-    turnaround_prompt: str
-
-
-class CharacterPromptsList(BaseModel):
-    characters: List[CharacterPrompts]
 
 
 @characters_router.post(
@@ -94,30 +86,34 @@ async def extract_characters(project_uuid: str):
             detail="No script found",
         )
 
-    # Build extraction prompt
-    prompt = (
-        "Extract all characters from the following script. "
-        "For each character, provide: name, type (e.g., protagonist, antagonist, supporting), "
-        "importance (e.g., main, minor, background), and a brief description. "
-        "Return ONLY valid JSON matching the requested schema.\n\n"
-        f"{script_content}"
-    )
+    # Build extraction messages
+    messages = build_character_extraction_messages(script_content)
 
     # Call Fireworks AI
     client = FireworksClient()
     try:
         result = await client.chat_completion(
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             json_schema=CharacterList,
         )
     except (AuthenticationError, RateLimitError, APIError) as exc:
         _handle_fireworks_error(exc)
 
-    # Save extraction result to characters.json
+    # Validate BEFORE persisting
+    try:
+        validated = CharacterList(**result)
+    except ValidationError as exc:
+        logging.error("AI returned data in an unexpected format", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI returned data in an unexpected format",
+        ) from exc
+
+    # Save validated extraction result to characters.json
     project_dir = os.path.join(_projects_module.PROJECTS_BASE_DIR, project_uuid)
     characters_path = os.path.join(project_dir, "characters.json")
     with open(characters_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+        json.dump(validated.model_dump(), f, indent=2)
 
     # Update sub-step state in state.json
     state_json_path = os.path.join(project_dir, ".conduit", "state.json")
@@ -128,7 +124,7 @@ async def extract_characters(project_uuid: str):
         with open(state_json_path, "w", encoding="utf-8") as f:
             json.dump(state_data, f, indent=2)
 
-    return CharacterList(**result)
+    return validated
 
 
 @characters_router.get(
@@ -187,42 +183,47 @@ async def generate_prompts(project_uuid: str):
             detail="Character extraction not completed",
         )
 
-    # Build prompt generation prompt
-    prompt_lines = [
-        "For each character below, generate two prompts:",
-        "1. front_profile_prompt: A detailed description of the character's face from the front, suitable for generating a front-profile image.",
-        "2. turnaround_prompt: A detailed description of the character's appearance (clothing, features, build) from all angles, suitable for a 360-degree turnaround.",
-        "Return ONLY valid JSON matching the requested schema.",
-        "",
-        "Characters:",
-    ]
-    for char in characters:
-        name = char.get("name", "Unknown")
-        description = char.get("description", "")
-        char_type = char.get("type", "")
-        importance = char.get("importance", "")
-        prompt_lines.append(f"- {name} ({importance} {char_type}): {description}")
+    # Get style
+    style_id = get_style_id(project_uuid)
+    style = get_style(style_id)
 
-    prompt = "\n".join(prompt_lines)
+    # Build messages for two batch calls
+    front_messages = build_front_profile_messages(characters, style)
+    turnaround_messages = build_turnaround_messages(characters, style)
 
-    # Call Fireworks AI
+    # Call Fireworks AI — two batch calls
     client = FireworksClient()
     try:
-        result = await client.chat_completion(
-            messages=[{"role": "user", "content": prompt}],
-            json_schema=CharacterPromptsList,
+        front_result = await client.chat_completion(
+            messages=front_messages,
+            json_schema=FrontProfilePromptList,
+        )
+        turnaround_result = await client.chat_completion(
+            messages=turnaround_messages,
+            json_schema=TurnaroundPromptList,
         )
     except (AuthenticationError, RateLimitError, APIError) as exc:
         _handle_fireworks_error(exc)
 
-    # Merge prompts back into existing characters.json
-    prompts_data = result
+    # Merge by name — guard against omission/mismatch
+    front_by_name = {
+        c.get("name"): c for c in front_result.get("characters", [])
+    }
+    turnaround_by_name = {
+        c.get("name"): c for c in turnaround_result.get("characters", [])
+    }
+
     for char in characters:
-        for prompt_entry in prompts_data.get("characters", []):
-            if prompt_entry.get("name") == char.get("name"):
-                char["front_profile_prompt"] = prompt_entry.get("front_profile_prompt", "")
-                char["turnaround_prompt"] = prompt_entry.get("turnaround_prompt", "")
-                break
+        name = char.get("name")
+        front = front_by_name.get(name)
+        turnaround = turnaround_by_name.get(name)
+        if not front or not turnaround:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="AI returned incomplete character prompts",
+            )
+        char["front_profile_prompt"] = front.get("front_profile_prompt", "")
+        char["turnaround_prompt"] = turnaround.get("turnaround_prompt", "")
 
     with open(characters_path, "w", encoding="utf-8") as f:
         json.dump(existing_data, f, indent=2)
@@ -239,4 +240,4 @@ async def generate_prompts(project_uuid: str):
         with open(state_json_path, "w", encoding="utf-8") as f:
             json.dump(state_data, f, indent=2)
 
-    return CharacterPromptsList(**prompts_data)
+    return CharacterPromptsList(**existing_data)

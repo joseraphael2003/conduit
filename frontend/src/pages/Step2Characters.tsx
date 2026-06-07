@@ -15,11 +15,11 @@ import { apiBase } from "@/config";
 
 interface Character {
   name: string;
-  type: string;
-  importance: string;
+  type: "speaking" | "creature" | "npc_entity";
+  importance: "major" | "minor";
   description: string;
   front_profile_prompt?: string;
-  turnaround_reference_prompt?: string;
+  turnaround_prompt?: string;
 }
 
 interface ApiResponse {
@@ -271,7 +271,7 @@ export function Step2Characters() {
                       <span
                         className={cn(
                           "inline-flex items-center px-2 py-0.5 font-body text-xs font-semibold tracking-wide uppercase border",
-                          char.importance === "main"
+                          char.importance === "major"
                             ? "text-[#F0A040] border-[#F0A040]/20 bg-[#F0A040]/10"
                             : "text-[#5A5A6A] border-[#5A5A6A]/20 bg-[#5A5A6A]/10"
                         )}
@@ -352,7 +352,7 @@ export function Step2Characters() {
                   <span
                     className={cn(
                       "inline-flex items-center px-2 py-0.5 font-body text-xs font-semibold tracking-wide uppercase border",
-                      char.importance === "main"
+                      char.importance === "major"
                         ? "text-[#F0A040] border-[#F0A040]/20 bg-[#F0A040]/10"
                         : "text-[#5A5A6A] border-[#5A5A6A]/20 bg-[#5A5A6A]/10"
                     )}
@@ -404,24 +404,24 @@ export function Step2Characters() {
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <span className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A]">
-                        Turnaround Reference Prompt
+                        Turnaround Prompt
                       </span>
                       <button
                         onClick={() =>
                           handleCopy(
-                            char.turnaround_reference_prompt ?? "",
-                            `turn-${char.name}`
+                          char.turnaround_prompt ?? "",
+                          `turn-${char.name}`
                           )
                         }
                         className="flex items-center gap-1 text-[#8A8A9A] hover:text-[#E8E8F0] font-body text-xs"
-                        aria-label={`Copy turnaround reference prompt for ${char.name}`}
+                        aria-label={`Copy turnaround prompt for ${char.name}`}
                       >
                         <Copy size={12} weight="regular" />
                         {copiedMap[`turn-${char.name}`] ? "Copied" : "Copy"}
                       </button>
                     </div>
                     <p className="font-body text-sm text-[#E8E8F0] bg-[#1A1A24] p-3 border border-[#2A2A35] whitespace-pre-wrap">
-                      {char.turnaround_reference_prompt}
+                      {char.turnaround_prompt}
                     </p>
                   </div>
                 </div>

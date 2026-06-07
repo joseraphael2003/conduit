@@ -11,9 +11,9 @@ Media Pipeline/
 ├── backend/               # FastAPI app (Python 3.12+)
 │   ├── main.py            # App entry point, router registration
 │   ├── config.py          # Settings / env var loading
-│   ├── models/            # Pydantic models + SQLite schema (database.py)
+│   ├── models/            # Pydantic models + SQLite schema (database.py, project.py, state.py, characters.py, segments.py)
 │   ├── routers/           # One file per step: projects, characters, segments, images, video
-│   ├── services/          # Business logic: whisper, fireworks, ffmpeg, srt, state, chunking, effects
+│   ├── services/          # Business logic: whisper, fireworks, ffmpeg, srt, state, chunking, effects, prompts
 │   └── tests/             # pytest tests (conftest.py + per-router test files)
 ├── frontend/              # React + Vite app (TypeScript strict)
 │   └── src/

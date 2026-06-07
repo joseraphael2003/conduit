@@ -44,13 +44,13 @@ async def test_extract_characters_happy_path(async_client, cleanup_projects, cre
                                         "characters": [
                                             {
                                                 "name": "Alice",
-                                                "type": "protagonist",
-                                                "importance": "main",
+                                                "type": "speaking",
+                                                "importance": "major",
                                                 "description": "A brave knight.",
                                             },
                                             {
                                                 "name": "Bob",
-                                                "type": "antagonist",
+                                                "type": "creature",
                                                 "importance": "minor",
                                                 "description": "A cunning thief.",
                                             },
@@ -78,10 +78,12 @@ async def test_extract_characters_happy_path(async_client, cleanup_projects, cre
             assert "importance" in char
             assert "description" in char
 
-        # Assert prompt contains script content
+        # Assert prompt contains script content (user message)
         request = route.calls.last.request
         body = json.loads(request.content)
-        prompt = body["messages"][0]["content"]
+        assert body["messages"][0]["role"] == "system"
+        assert "character extraction engine" in body["messages"][0]["content"]
+        prompt = body["messages"][1]["content"]
         assert script_content in prompt, "Prompt should contain script content"
 
     # Assert characters.json saved
@@ -207,6 +209,63 @@ async def test_extract_characters_rate_limit_error(async_client, cleanup_project
 
 
 @pytest.mark.asyncio
+async def test_extract_invalid_enum_returns_502(async_client, cleanup_projects, created_project):
+    """AI returning an invalid enum value is rejected and characters.json is NOT written."""
+    project_uuid = created_project["uuid"]
+    step1_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    assert step1_resp.status_code == 200
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    script_path = os.path.join(conduit_dir, "source_of_truth_script.txt")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write("Some script content")
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {
+                                        "characters": [
+                                            {
+                                                "name": "Alice",
+                                                "type": "protagonist",  # invalid enum
+                                                "importance": "major",
+                                                "description": "A brave knight.",
+                                            }
+                                        ]
+                                    }
+                                ),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+        response = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/characters/extract"
+        )
+        assert response.status_code == 502
+        assert "AI returned data in an unexpected format" in response.json()["detail"]
+
+    # Validate-before-persist: file must NOT be written
+    characters_path = os.path.join(project_dir, "characters.json")
+    assert not os.path.exists(characters_path)
+
+
+@pytest.mark.asyncio
 async def test_get_characters_happy_path(async_client, cleanup_projects, created_project):
     """GET /characters returns 200 with character array."""
     project_uuid = created_project["uuid"]
@@ -217,8 +276,8 @@ async def test_get_characters_happy_path(async_client, cleanup_projects, created
         "characters": [
             {
                 "name": "Alice",
-                "type": "protagonist",
-                "importance": "main",
+                "type": "speaking",
+                "importance": "major",
                 "description": "Brave knight.",
             }
         ]
@@ -232,8 +291,8 @@ async def test_get_characters_happy_path(async_client, cleanup_projects, created
     assert "characters" in result
     assert len(result["characters"]) == 1
     assert result["characters"][0]["name"] == "Alice"
-    assert result["characters"][0]["type"] == "protagonist"
-    assert result["characters"][0]["importance"] == "main"
+    assert result["characters"][0]["type"] == "speaking"
+    assert result["characters"][0]["importance"] == "major"
     assert result["characters"][0]["description"] == "Brave knight."
 
 
@@ -257,8 +316,8 @@ async def test_update_characters(async_client, cleanup_projects, created_project
         "characters": [
             {
                 "name": "Alice",
-                "type": "protagonist",
-                "importance": "main",
+                "type": "speaking",
+                "importance": "major",
                 "description": "Brave knight.",
             }
         ]
@@ -270,8 +329,8 @@ async def test_update_characters(async_client, cleanup_projects, created_project
         "characters": [
             {
                 "name": "Alice",
-                "type": "protagonist",
-                "importance": "main",
+                "type": "speaking",
+                "importance": "major",
                 "description": "A very brave knight.",
             }
         ]
@@ -305,13 +364,13 @@ async def test_generate_prompts_happy_path(async_client, cleanup_projects, creat
         "characters": [
             {
                 "name": "Alice",
-                "type": "protagonist",
-                "importance": "main",
+                "type": "speaking",
+                "importance": "major",
                 "description": "A brave knight with silver armor.",
             },
             {
                 "name": "Bob",
-                "type": "antagonist",
+                "type": "creature",
                 "importance": "minor",
                 "description": "A cunning thief with a dark cloak.",
             },
@@ -320,10 +379,14 @@ async def test_generate_prompts_happy_path(async_client, cleanup_projects, creat
     with open(characters_path, "w", encoding="utf-8") as f:
         json.dump(initial_characters, f)
 
-    # Mock Fireworks AI response
-    with respx.mock:
-        route = respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
-            return_value=httpx.Response(
+    # Two-batch side_effect: first call = front profiles, second call = turnarounds
+    call_count = 0
+
+    def side_effect(request):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return httpx.Response(
                 200,
                 json={
                     "id": "test-id",
@@ -341,11 +404,42 @@ async def test_generate_prompts_happy_path(async_client, cleanup_projects, creat
                                             {
                                                 "name": "Alice",
                                                 "front_profile_prompt": "Front profile of Alice, a brave knight with silver armor.",
-                                                "turnaround_prompt": "360 view of Alice, a brave knight with silver armor.",
                                             },
                                             {
                                                 "name": "Bob",
                                                 "front_profile_prompt": "Front profile of Bob, a cunning thief with a dark cloak.",
+                                            },
+                                        ]
+                                    }
+                                ),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        else:
+            return httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {
+                                        "characters": [
+                                            {
+                                                "name": "Alice",
+                                                "turnaround_prompt": "360 view of Alice, a brave knight with silver armor.",
+                                            },
+                                            {
+                                                "name": "Bob",
                                                 "turnaround_prompt": "360 view of Bob, a cunning thief with a dark cloak.",
                                             },
                                         ]
@@ -357,6 +451,10 @@ async def test_generate_prompts_happy_path(async_client, cleanup_projects, creat
                     ],
                 },
             )
+
+    with respx.mock:
+        route = respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            side_effect=side_effect
         )
 
         response = await async_client.post(
@@ -371,14 +469,17 @@ async def test_generate_prompts_happy_path(async_client, cleanup_projects, creat
             assert "front_profile_prompt" in char
             assert "turnaround_prompt" in char
 
-        # Assert prompt contains character descriptions
+        # Assert exactly 2 calls were made
+        assert route.call_count == 2
+
+        # Assert prompt contains character descriptions (user message of last call)
         request = route.calls.last.request
         body = json.loads(request.content)
-        prompt = body["messages"][0]["content"]
-        assert "Alice" in prompt
-        assert "Bob" in prompt
-        assert "brave knight" in prompt
-        assert "cunning thief" in prompt
+        user_prompt = body["messages"][1]["content"]
+        assert "Alice" in user_prompt
+        assert "Bob" in user_prompt
+        assert "brave knight" in user_prompt
+        assert "cunning thief" in user_prompt
 
     # Assert characters.json updated with prompts
     with open(characters_path, "r", encoding="utf-8") as f:
@@ -433,8 +534,8 @@ async def test_generate_prompts_fireworks_failure(async_client, cleanup_projects
         "characters": [
             {
                 "name": "Alice",
-                "type": "protagonist",
-                "importance": "main",
+                "type": "speaking",
+                "importance": "major",
                 "description": "A brave knight.",
             }
         ]
@@ -461,6 +562,126 @@ async def test_generate_prompts_fireworks_failure(async_client, cleanup_projects
 
 
 @pytest.mark.asyncio
+async def test_generate_prompts_name_mismatch_returns_502(async_client, cleanup_projects, created_project):
+    """Turnaround omits a character → merge guard raises 502 and characters.json is NOT updated."""
+    project_uuid = created_project["uuid"]
+    step1_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    assert step1_resp.status_code == 200
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    characters_path = os.path.join(project_dir, "characters.json")
+    initial_characters = {
+        "characters": [
+            {
+                "name": "Alice",
+                "type": "speaking",
+                "importance": "major",
+                "description": "A brave knight.",
+            },
+            {
+                "name": "Bob",
+                "type": "creature",
+                "importance": "minor",
+                "description": "A cunning thief.",
+            },
+        ]
+    }
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump(initial_characters, f)
+
+    call_count = 0
+
+    def side_effect(request):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # Front profile for both characters
+            return httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {
+                                        "characters": [
+                                            {
+                                                "name": "Alice",
+                                                "front_profile_prompt": "Front profile of Alice.",
+                                            },
+                                            {
+                                                "name": "Bob",
+                                                "front_profile_prompt": "Front profile of Bob.",
+                                            },
+                                        ]
+                                    }
+                                ),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        else:
+            # Turnaround omits Bob
+            return httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {
+                                        "characters": [
+                                            {
+                                                "name": "Alice",
+                                                "turnaround_prompt": "360 view of Alice.",
+                                            }
+                                            # Bob is missing
+                                        ]
+                                    }
+                                ),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            side_effect=side_effect
+        )
+        response = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/characters/prompts"
+        )
+        assert response.status_code == 502
+        assert "AI returned incomplete character prompts" in response.json()["detail"]
+
+    # Assert characters.json is preserved (no prompts written)
+    with open(characters_path, "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert "front_profile_prompt" not in saved["characters"][0]
+    assert "turnaround_prompt" not in saved["characters"][0]
+    assert "front_profile_prompt" not in saved["characters"][1]
+    assert "turnaround_prompt" not in saved["characters"][1]
+    assert saved["characters"][0]["name"] == "Alice"
+    assert saved["characters"][1]["name"] == "Bob"
+
+
+@pytest.mark.asyncio
 async def test_generate_prompts_authentication_error(async_client, cleanup_projects, created_project):
     """Fireworks API authentication error returns 502."""
     project_uuid = created_project["uuid"]
@@ -473,8 +694,8 @@ async def test_generate_prompts_authentication_error(async_client, cleanup_proje
         "characters": [
             {
                 "name": "Alice",
-                "type": "protagonist",
-                "importance": "main",
+                "type": "speaking",
+                "importance": "major",
                 "description": "A brave knight.",
             }
         ]
@@ -506,8 +727,8 @@ async def test_generate_prompts_rate_limit_error(async_client, cleanup_projects,
         "characters": [
             {
                 "name": "Alice",
-                "type": "protagonist",
-                "importance": "main",
+                "type": "speaking",
+                "importance": "major",
                 "description": "A brave knight.",
             }
         ]

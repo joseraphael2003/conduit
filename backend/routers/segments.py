@@ -1,15 +1,27 @@
 import logging
 import os
 import json
-from typing import List, Optional
+from typing import List
 
 from fastapi import APIRouter, HTTPException, status
 from openai._exceptions import AuthenticationError, RateLimitError, APIError
-from pydantic import BaseModel, Field
 
+from models.segments import (
+    SegmentBreakdown,
+    Segments,
+    SegmentPrompt,
+    SegmentPrompts,
+    SplitRequest,
+    SegmentEffectUpdate,
+)
 from services.fireworks import FireworksClient
-from services.state import get_state, update_state
+from services.state import get_state, update_state, get_style_id
 from services.effects import validate_effect
+from services.prompts import (
+    build_segment_breakdown_messages,
+    build_segment_prompts_messages,
+    get_style,
+)
 from models.state import ProjectState
 from config import PROJECTS_BASE_DIR
 
@@ -37,43 +49,6 @@ def _handle_fireworks_error(exc: Exception) -> None:
             detail="AI request failed",
         ) from exc
     raise exc
-
-
-class SegmentBreakdown(BaseModel):
-    segment_index: int
-    script_line: str
-    start_time: float
-    end_time: float
-    duration: float
-    effect: str = "none"
-
-
-class Segments(BaseModel):
-    segments: List[SegmentBreakdown]
-
-
-class SegmentPrompt(BaseModel):
-    segment_index: int
-    script_line: str
-    segment_prompt: str
-    characters_present: List[str]
-    start_time: float
-    end_time: float
-    duration: float
-    effect: str = "none"
-
-
-class SegmentPrompts(BaseModel):
-    segments: List[SegmentPrompt]
-
-
-class SplitRequest(BaseModel):
-    word_index: Optional[int] = None
-    timestamp: Optional[float] = None
-
-
-class SegmentEffectUpdate(BaseModel):
-    effect: str
 
 
 def _get_project_dir(uuid: str) -> str:
@@ -104,41 +79,17 @@ def _is_token_limit_error(exc: Exception) -> bool:
     return any(kw in message for kw in token_keywords)
 
 
-def _build_segment_prompts_prompt(segments_batch: List[dict], characters_data: dict) -> str:
-    """Build the prompt for segment prompt generation."""
-    characters = []
-    if isinstance(characters_data, dict):
-        characters = characters_data.get("characters", [])
-
-    prompt = (
-        "You are given a list of video segments and a list of characters. "
-        "For each segment, generate an image generation prompt that describes the visual scene, "
-        "and identify which characters from the character list are present in that segment. "
-        "Return the result as a JSON object with a 'segments' array. "
-        "Each segment must include: segment_index, script_line, segment_prompt, characters_present, start_time, end_time, duration.\n\n"
-    )
-
-    if characters:
-        prompt += "Characters:\n" + json.dumps(characters, indent=2) + "\n\n"
-    else:
-        prompt += "Characters: (none identified)\n\n"
-
-    prompt += "Segments:\n" + json.dumps(segments_batch, indent=2)
-    return prompt
-
-
 async def _generate_prompts_for_batch(
     segments_batch: List[dict],
     characters_data: dict,
     client: FireworksClient,
+    uuid: str,
 ) -> List[dict]:
     """Generate prompts for a single batch of segments."""
-    prompt = _build_segment_prompts_prompt(segments_batch, characters_data)
+    style = get_style(get_style_id(uuid))
+    messages = build_segment_prompts_messages(segments_batch, characters_data, style)
     result = await client.chat_completion(
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that generates image prompts for video segments."},
-            {"role": "user", "content": prompt},
-        ],
+        messages=messages,
         json_schema=SegmentPrompts,
         max_tokens=4096,
     )
@@ -151,6 +102,7 @@ async def _generate_prompts_in_batches(
     segments: List[dict],
     characters_data: dict,
     client: FireworksClient,
+    uuid: str,
 ) -> List[dict]:
     """Fallback: generate prompts in overlapping batches."""
     batch_size = 25
@@ -159,7 +111,7 @@ async def _generate_prompts_in_batches(
     i = 0
     while i < len(segments):
         batch = segments[i : i + batch_size]
-        batch_results = await _generate_prompts_for_batch(batch, characters_data, client)
+        batch_results = await _generate_prompts_for_batch(batch, characters_data, client, uuid)
         for seg in batch_results:
             result_map[seg["segment_index"]] = seg
         i += batch_size - overlap
@@ -204,24 +156,12 @@ async def breakdown_segments(uuid: str):
     words_data = _load_json(words_path)
     words = words_data.get("words", words_data)
 
-    # Build prompt
-    prompt = (
-        "You are given a voiceover script and a list of transcribed words with timestamps. "
-        "Break the script into logical segments (e.g., sentences or phrases). "
-        "For each segment, provide the exact script line, the start time (from the first word), "
-        "the end time (from the last word), and the duration. "
-        "Return the result as a JSON object with a 'segments' array.\n\n"
-        "Script:\n" + script_text + "\n\n"
-        "Words with timestamps:\n" + json.dumps(words, indent=2)
-    )
+    messages = build_segment_breakdown_messages(script_text, json.dumps(words, indent=2))
 
     client = FireworksClient()
     try:
         result = await client.chat_completion(
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that breaks scripts into timed segments."},
-                {"role": "user", "content": prompt},
-            ],
+            messages=messages,
             json_schema=Segments,
         )
     except (AuthenticationError, RateLimitError, APIError) as exc:
@@ -495,11 +435,11 @@ async def generate_segment_prompts(uuid: str):
 
     client = FireworksClient()
     try:
-        result = await _generate_prompts_for_batch(segments, characters_data, client)
+        result = await _generate_prompts_for_batch(segments, characters_data, client, uuid)
     except (AuthenticationError, RateLimitError, APIError) as exc:
         if isinstance(exc, APIError) and _is_token_limit_error(exc):
             try:
-                result = await _generate_prompts_in_batches(segments, characters_data, client)
+                result = await _generate_prompts_in_batches(segments, characters_data, client, uuid)
             except (AuthenticationError, RateLimitError, APIError) as batch_exc:
                 _handle_fireworks_error(batch_exc)
         else:

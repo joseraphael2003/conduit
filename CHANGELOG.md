@@ -666,12 +666,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## File Inventory
 
-### Backend (25 Python files)
+### Backend (34 Python files)
 ```
 backend/main.py
 backend/models/database.py
 backend/models/project.py
 backend/models/state.py
+backend/models/characters.py
+backend/models/segments.py
 backend/models/__init__.py
 backend/routers/__init__.py
 backend/routers/projects.py
@@ -687,6 +689,7 @@ backend/services/srt.py
 backend/services/state.py
 backend/services/ffmpeg.py
 backend/services/effects.py
+backend/services/prompts.py
 backend/tests/__init__.py
 backend/tests/conftest.py
 backend/tests/test_projects.py
@@ -695,6 +698,9 @@ backend/tests/test_segments.py
 backend/tests/test_images.py
 backend/tests/test_fireworks.py
 backend/tests/test_video.py
+backend/tests/test_prompts.py
+backend/tests/test_schema_flatten.py
+backend/tests/test_style_state.py
 backend/utils/__init__.py
 ```
 
@@ -754,14 +760,22 @@ frontend/components.json
 | Session 2 | 51 | 34 | 85 |
 | Session 3 | 96 | 52 | 148 |
 | Session 4 | 102 | 75 | 177 |
+| **v0.5.0** | 102 | 73 | 175 |
+| **v0.6.0** | 114 | 73 | 187 |
+| **v0.7.0** | 148 | 73* | 221 |
 
-### Backend Test Breakdown
+\* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
+
+### Backend Test Breakdown (v0.7.0 — 148 tests)
 - `test_fireworks.py` — 9 tests (client, base_url, retry logic, json_schema, error handling)
-- `test_characters.py` — 8 tests (extract, prompts, missing script, prerequisite, failures, update)
-- `test_segments.py` — 14 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback)
-- `test_images.py` — 9 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found)
-- `test_projects.py` — 11 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript)
-- `test_video.py` — 45 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters)
+- `test_characters.py` — 16 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT)
+- `test_segments.py` — 18 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions)
+- `test_images.py` — 13 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status)
+- `test_projects.py` — 13 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript)
+- `test_video.py` — 47 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters)
+- `test_prompts.py` — 28 tests (StyleProfile injection, 5 builders' anchors/rules, SHOT_TYPES, get_style fallback)
+- `test_schema_flatten.py` — 2 tests (enum survives `_flatten_schema`, Pydantic rejects bad enum)
+- `test_style_state.py` — 2 tests (style_id persisted on create, `get_style_id` default fallback)
 
 ### Frontend Test Breakdown
 - `dashboard.spec.ts` — 5 tests (empty state, Create Project button, project card, fonts, background)
@@ -796,13 +810,16 @@ frontend/components.json
 ### Segments
 - `POST /api/v1/projects/{uuid}/segments/breakdown` — Breakdown segments
 - `POST /api/v1/projects/{uuid}/segments/prompts` — Generate segment prompts
+- `GET /api/v1/projects/{uuid}/segments` — Get all segments
 - `PUT /api/v1/projects/{uuid}/segments` — Update segments
+- `PUT /api/v1/projects/{uuid}/segments/{segment_index}/effect` — Update segment effect
 - `POST /api/v1/projects/{uuid}/segments/{segment_index}/split` — Split segment
 - `POST /api/v1/projects/{uuid}/segments/{segment_index}/merge` — Merge segments
 
 ### Images
 - `POST /api/v1/projects/{uuid}/images/{segment_index}` — Upload image
 - `GET /api/v1/projects/{uuid}/images/{segment_index}` — Get image
+- `GET /api/v1/projects/{uuid}/images/status` — Batch image-status map
 
 ### Video
 - `POST /api/v1/projects/{uuid}/video/generate` — Generate video from segments
@@ -843,7 +860,7 @@ frontend/components.json
 
 ### Infrastructure
 - SQLite (file-based, WAL mode)
-- ffmpeg 4.0 (for video generation, Session 3)
+- ffmpeg 8.1.1 (for video generation)
 - No Docker, no cloud, no auth
 - Localhost only: backend `localhost:8000`, frontend `localhost:5173`
 

@@ -38,6 +38,7 @@ def create_project_directory(project_uuid: str) -> None:
     state_metadata = {
         "uuid": project_uuid,
         "state": "created",
+        "style_id": "secret_level",
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     state_json_path = os.path.join(conduit_dir, "state.json")

@@ -121,6 +121,16 @@ def set_sub_step_state(uuid: str, key: str, value) -> None:
         json.dump(data, f, indent=2)
 
 
+def get_style_id(uuid: str) -> str:
+    """Read style_id from state.json, defaulting to secret_level."""
+    state_json_path = _get_state_json_path(uuid)
+    if not os.path.exists(state_json_path):
+        return "secret_level"
+    with open(state_json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("style_id", "secret_level")
+
+
 def _delete_downstream_files(project_dir: str, edited_step: int) -> None:
     """Delete downstream JSON files when invalidating from a step."""
     # Step 1 specific files
