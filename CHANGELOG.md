@@ -5,6 +5,34 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] — 2026-06-08 — Split/Merge Prompt Preservation
+
+### Fixed
+- **`split_segment` and `merge_segment` no longer silently wipe `segment_prompt`, `characters_present`, and `image_path` from untouched segments** (`backend/routers/segments.py`) — Both endpoints now operate on raw dicts (mirroring the 0.8.1 `update_segments`/`get_segments` fix). Untouched segments retain all optional fields. Changed segments (split halves / merged result) are reset with `segment_prompt=""`, `characters_present=[]`, and `image_path` removed for regeneration.
+
+### Known Limitation
+- Images are stored as `images/{segment_index:04d}.png` and split/merge renumber indices, so existing image files can misalign with segments after re-segmentation — deferred to future work.
+
+### Testing
+- 183 backend tests passed (0 failures); `tsc --noEmit` → 0 errors.
+
+## [0.8.1] — 2026-06-08 — Post-Release Fixes
+
+### Fixed
+- **Breakdown truncation / 500** (`backend/routers/segments.py`, `backend/services/fireworks.py`) — Pass 1 breakdown now uses `max_tokens=16000` (up from default) to prevent mid-segment truncation. Centralized JSON-parse guard in `fireworks.py` catches malformed AI responses with `try/except json.JSONDecodeError`, re-raising as `APIError` so callers map it to 502 instead of leaking a 500.
+- **PUT prompt preservation** (`backend/routers/segments.py`) — `PUT /segments` now merges incoming fields with on-disk data (`{**on_disk[idx], **incoming[idx]}`) so `segment_prompt`, `characters_present`, and `image_path` are preserved when the client omits them.
+- **Step 3 prompt visibility** (`backend/routers/segments.py`, `frontend/src/pages/Step3Segments.tsx`) — `GET /segments` no longer strips optional fields via `response_model=Segments`; returns raw dicts so `segment_prompt`, `characters_present`, and `image_path` are always present. Frontend aligned field names from legacy `prompt`/`characters` to `segment_prompt`/`characters_present`.
+- **Title bar project name** (`frontend/src/components/WizardShell.tsx`) — Fetches `GET /projects/{uuid}` and displays the real project name in the title bar instead of hardcoded `Untitled Project`.
+
+### Changed
+- **Step 2 / Step 3 UI polish** (`frontend/src/pages/Step2Characters.tsx`, `frontend/src/pages/Step3Segments.tsx`) — Step 2: description textarea is now vertically resizable (`resize-y`, 4 rows), single-default-version groups render a compact row instead of a full card, `appears_from` placeholder changed to a narrative hint, AI model label corrected to `Fireworks · Kimi K2.6`. Step 3: action buttons right-aligned (`justify-end`) with secondary-on-left / primary-on-right ordering, empty state shows an inline primary CTA.
+
+### Maintenance
+- **Synced `requirements.txt` to the installed/tested versions** — pins had drifted behind the environment. Bumped `fastapi` 0.115.0→0.119.1, `uvicorn` 0.34.0→0.47.0, `pydantic` 2.10.0→2.13.4, `python-multipart` 0.0.20→0.0.28, `openai` 1.60.0→2.38.0, `httpx` 0.28.0→0.28.1, `pytest` 8.3.0→9.0.3, `pytest-asyncio` 0.24.0→1.3.0, `respx` 0.22.0→0.23.1, `python-dotenv` 1.0.0→1.2.2 (pydub/srt/aiosqlite unchanged). Tech Stack appendix updated to match. The `APIError(message, request, *, body)` signature used by the breakdown JSON-guard is stable across openai 1.x/2.x.
+
+### Testing
+- 181 backend tests passed (0 failures); `tsc --noEmit` → 0 errors.
+
 ## [0.8.0] — 2026-06-08 — Character Versions
 
 ### Added
@@ -24,34 +52,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Testing
 - 172 backend tests passed (0 failures); `tsc --noEmit` → 0 errors.
-
-## [0.8.1] — 2026-06-08 — Post-Release Fixes
-
-### Fixed
-- **Breakdown truncation / 500** (`backend/routers/segments.py`, `backend/services/fireworks.py`) — Pass 1 breakdown now uses `max_tokens=16000` (up from default) to prevent mid-segment truncation. Centralized JSON-parse guard in `fireworks.py` catches malformed AI responses with `try/except json.JSONDecodeError`, re-raising as `APIError` so callers map it to 502 instead of leaking a 500.
-- **PUT prompt preservation** (`backend/routers/segments.py`) — `PUT /segments` now merges incoming fields with on-disk data (`{**on_disk[idx], **incoming[idx]}`) so `segment_prompt`, `characters_present`, and `image_path` are preserved when the client omits them.
-- **Step 3 prompt visibility** (`backend/routers/segments.py`, `frontend/src/pages/Step3Segments.tsx`) — `GET /segments` no longer strips optional fields via `response_model=Segments`; returns raw dicts so `segment_prompt`, `characters_present`, and `image_path` are always present. Frontend aligned field names from legacy `prompt`/`characters` to `segment_prompt`/`characters_present`.
-- **Title bar project name** (`frontend/src/components/WizardShell.tsx`) — Fetches `GET /projects/{uuid}` and displays the real project name in the title bar instead of hardcoded `Untitled Project`.
-
-### Changed
-- **Step 2 / Step 3 UI polish** (`frontend/src/pages/Step2Characters.tsx`, `frontend/src/pages/Step3Segments.tsx`) — Step 2: description textarea is now vertically resizable (`resize-y`, 4 rows), single-default-version groups render a compact row instead of a full card, `appears_from` placeholder changed to a narrative hint, AI model label corrected to `Fireworks · Kimi K2.6`. Step 3: action buttons right-aligned (`justify-end`) with secondary-on-left / primary-on-right ordering, empty state shows an inline primary CTA.
-
-### Maintenance
-- **Synced `requirements.txt` to the installed/tested versions** — pins had drifted behind the environment. Bumped `fastapi` 0.115.0→0.119.1, `uvicorn` 0.34.0→0.47.0, `pydantic` 2.10.0→2.13.4, `python-multipart` 0.0.20→0.0.28, `openai` 1.60.0→2.38.0, `httpx` 0.28.0→0.28.1, `pytest` 8.3.0→9.0.3, `pytest-asyncio` 0.24.0→1.3.0, `respx` 0.22.0→0.23.1, `python-dotenv` 1.0.0→1.2.2 (pydub/srt/aiosqlite unchanged). Tech Stack appendix updated to match. The `APIError(message, request, *, body)` signature used by the breakdown JSON-guard is stable across openai 1.x/2.x.
-
-### Testing
-- 181 backend tests passed (0 failures); `tsc --noEmit` → 0 errors.
-
-## [0.8.2] — 2026-06-08 — Split/Merge Prompt Preservation
-
-### Fixed
-- **`split_segment` and `merge_segment` no longer silently wipe `segment_prompt`, `characters_present`, and `image_path` from untouched segments** (`backend/routers/segments.py`) — Both endpoints now operate on raw dicts (mirroring the 0.8.1 `update_segments`/`get_segments` fix). Untouched segments retain all optional fields. Changed segments (split halves / merged result) are reset with `segment_prompt=""`, `characters_present=[]`, and `image_path` removed for regeneration.
-
-### Known Limitation
-- Images are stored as `images/{segment_index:04d}.png` and split/merge renumber indices, so existing image files can misalign with segments after re-segmentation — deferred to future work.
-
-### Testing
-- 183 backend tests passed (0 failures); `tsc --noEmit` → 0 errors.
 
 ## [0.7.3] — 2026-06-08 — Test Isolation + Delete Atomicity
 
