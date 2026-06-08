@@ -4,6 +4,7 @@ import pytest
 import httpx
 import respx
 from unittest.mock import patch
+from openai._exceptions import APIError
 
 @pytest.mark.asyncio
 async def test_breakdown_segments(async_client, cleanup_projects, temp_projects_dir):
@@ -2002,3 +2003,325 @@ async def test_merge_preserves_other_segment_fields(async_client, cleanup_projec
     assert segs[1]["start_time"] == 1.0
     assert segs[1]["end_time"] == 3.0
     assert segs[1]["duration"] == 2.0
+
+
+@pytest.mark.asyncio
+async def test_breakdown_assigns_segment_ids(async_client, cleanup_projects, temp_projects_dir):
+    """Mock breakdown call returns segments with unique segment_ids."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Segment ID Test"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    with open(os.path.join(conduit_dir, "source_of_truth_script.txt"), "w", encoding="utf-8") as f:
+        f.write("Hello world. This is a test.")
+    with open(os.path.join(conduit_dir, "words.json"), "w", encoding="utf-8") as f:
+        json.dump({"words": [{"word": "Hello", "start": 0.0, "end": 0.5}, {"word": "world", "start": 0.6, "end": 1.0}, {"word": "This", "start": 1.1, "end": 1.5}, {"word": "is", "start": 1.6, "end": 1.8}, {"word": "a", "start": 1.9, "end": 2.0}, {"word": "test", "start": 2.1, "end": 2.5}]}, f)
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "segments": [
+                                        {"segment_index": 0, "script_line": "Hello world.", "start_time": 0.0, "end_time": 1.0, "duration": 1.0},
+                                        {"segment_index": 1, "script_line": "This is a test.", "start_time": 1.1, "end_time": 2.5, "duration": 1.4},
+                                    ]
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/breakdown")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["segments"]) == 2
+        ids = [s["segment_id"] for s in data["segments"]]
+        assert all(ids)
+        assert len(set(ids)) == 2
+        assert ids[0] != ids[1]
+
+
+@pytest.mark.asyncio
+async def test_split_assigns_fresh_ids(async_client, cleanup_projects, temp_projects_dir):
+    """Split creates new segments with fresh segment_ids and preserves untouched segment_id."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Split IDs"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    original_id_0 = "seg-id-0-aaaaaaaa"
+    original_id_1 = "seg-id-1-bbbbbbbb"
+    segments = {
+        "segments": [
+            {"segment_index": 0, "script_line": "Hello world", "start_time": 0.0, "end_time": 4.0, "duration": 4.0, "segment_id": original_id_0},
+            {"segment_index": 1, "script_line": "Goodbye", "start_time": 4.0, "end_time": 5.0, "duration": 1.0, "segment_id": original_id_1},
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    resp = await async_client.post(
+        f"/api/v1/projects/{project_uuid}/segments/0/split",
+        json={"timestamp": 2.0}
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["segments"]) == 3
+    ids = [s["segment_id"] for s in data["segments"]]
+    assert ids[0] != original_id_0
+    assert ids[1] != original_id_0
+    assert ids[0] != ids[1]
+    assert ids[2] == original_id_1
+
+
+@pytest.mark.asyncio
+async def test_merge_assigns_fresh_id(async_client, cleanup_projects, temp_projects_dir):
+    """Merge creates a new segment with a fresh segment_id."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Merge IDs"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    original_id_0 = "seg-id-0-aaaaaaaa"
+    original_id_1 = "seg-id-1-bbbbbbbb"
+    segments = {
+        "segments": [
+            {"segment_index": 0, "script_line": "Hello", "start_time": 0.0, "end_time": 1.0, "duration": 1.0, "segment_id": original_id_0},
+            {"segment_index": 1, "script_line": "world", "start_time": 1.0, "end_time": 2.0, "duration": 1.0, "segment_id": original_id_1},
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/0/merge")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["segments"]) == 1
+    new_id = data["segments"][0]["segment_id"]
+    assert new_id != original_id_0
+    assert new_id != original_id_1
+    assert new_id
+
+
+@pytest.mark.asyncio
+async def test_update_preserves_segment_ids(async_client, cleanup_projects, temp_projects_dir):
+    """PUT update without segment_id preserves the original segment_id."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Update Preserve ID"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    original_id = "seg-id-preserve-1234"
+    segments = {
+        "segments": [
+            {"segment_index": 0, "script_line": "Line one", "start_time": 0.0, "end_time": 1.0, "duration": 1.0, "segment_id": original_id},
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    updated = {
+        "segments": [
+            {"segment_index": 0, "script_line": "Edited line"},
+        ]
+    }
+    resp = await async_client.put(f"/api/v1/projects/{project_uuid}/segments", json=updated)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["segments"][0]["segment_id"] == original_id
+    assert data["segments"][0]["script_line"] == "Edited line"
+
+
+@pytest.mark.asyncio
+async def test_update_backfills_missing_segment_id(async_client, cleanup_projects, temp_projects_dir):
+    """PUT update backfills missing segment_id with a new UUID."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Update Backfill ID"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {"segment_index": 0, "script_line": "Line one", "start_time": 0.0, "end_time": 1.0, "duration": 1.0},
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    updated = {
+        "segments": [
+            {"segment_index": 0, "script_line": "Edited line"},
+        ]
+    }
+    resp = await async_client.put(f"/api/v1/projects/{project_uuid}/segments", json=updated)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["segments"][0]["segment_id"]
+    assert isinstance(data["segments"][0]["segment_id"], str)
+    assert len(data["segments"][0]["segment_id"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_generate_prompts_max_tokens_16000(async_client, cleanup_projects, temp_projects_dir):
+    """POST prompts sends max_tokens=16000 to Fireworks."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Prompt Max Tokens"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {"segment_index": 0, "script_line": "Hello.", "start_time": 0.0, "end_time": 1.0, "duration": 1.0},
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    with respx.mock:
+        route = respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "segments": [
+                                        {"segment_index": 0, "script_line": "Hello.", "segment_prompt": "A prompt.", "characters_present": [], "start_time": 0.0, "end_time": 1.0, "duration": 1.0},
+                                    ]
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/prompts")
+        assert resp.status_code == 200
+
+        request = route.calls.last.request
+        body = json.loads(request.content)
+        assert body["max_tokens"] == 16000
+
+
+@pytest.mark.asyncio
+async def test_generate_prompts_truncation_triggers_fallback(async_client, cleanup_projects, temp_projects_dir):
+    """POST prompts triggers batch fallback when primary call is truncated."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Truncation Fallback"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {"segment_index": 0, "script_line": "Hello.", "start_time": 0.0, "end_time": 1.0, "duration": 1.0},
+            {"segment_index": 1, "script_line": "World.", "start_time": 1.0, "end_time": 2.0, "duration": 1.0},
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    characters = {"characters": [{"name": "Alice", "type": "speaking", "importance": "major", "description": "A girl"}]}
+    with open(os.path.join(temp_projects_dir, project_uuid, "characters.json"), "w", encoding="utf-8") as f:
+        json.dump(characters, f)
+
+    call_count = 0
+    def side_effect(request):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return httpx.Response(502, json={"error": "truncated"})
+        return httpx.Response(
+            200,
+            json={
+                "id": "test-id",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps({
+                                "segments": [
+                                    {"segment_index": 0, "script_line": "Hello.", "segment_prompt": "Prompt 0.", "characters_present": [], "start_time": 0.0, "end_time": 1.0, "duration": 1.0},
+                                    {"segment_index": 1, "script_line": "World.", "segment_prompt": "Prompt 1.", "characters_present": [], "start_time": 1.0, "end_time": 2.0, "duration": 1.0},
+                                ]
+                            }),
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(side_effect=side_effect)
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/prompts")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "segments" in data
+        assert len(data["segments"]) == 2
+        assert data["segments"][0]["segment_prompt"] == "Prompt 0."
+        assert data["segments"][1]["segment_prompt"] == "Prompt 1."
+
+
+@pytest.mark.asyncio
+async def test_generate_prompts_bad_json_no_fallback(async_client, cleanup_projects, temp_projects_dir):
+    """POST prompts returns 502 on non-truncation APIError without fallback."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Bad JSON No Fallback"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {"segment_index": 0, "script_line": "Hello.", "start_time": 0.0, "end_time": 1.0, "duration": 1.0},
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(500, json={"error": "some random error"})
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/prompts")
+        assert resp.status_code == 502

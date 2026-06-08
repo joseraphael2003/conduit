@@ -1,6 +1,8 @@
 import logging
 import os
 import json
+import uuid
+_uuid_module = uuid
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Body, HTTPException, status
@@ -28,6 +30,7 @@ from config import PROJECTS_BASE_DIR
 segments_router = APIRouter()
 
 BREAKDOWN_MAX_TOKENS = 16000
+SEGMENT_PROMPTS_MAX_TOKENS = 16000
 
 
 def _handle_fireworks_error(exc: Exception) -> None:
@@ -77,7 +80,7 @@ def _is_token_limit_error(exc: Exception) -> bool:
     if status_code == 413:
         return True
     message = str(exc).lower()
-    token_keywords = ["token limit", "too many tokens", "max tokens", "context length", "too long"]
+    token_keywords = ["token limit", "too many tokens", "max tokens", "context length", "too long", "truncated", "invalid or truncated json"]
     return any(kw in message for kw in token_keywords)
 
 
@@ -93,7 +96,7 @@ async def _generate_prompts_for_batch(
     result = await client.chat_completion(
         messages=messages,
         json_schema=SegmentPrompts,
-        max_tokens=4096,
+        max_tokens=SEGMENT_PROMPTS_MAX_TOKENS,
     )
     if not isinstance(result, dict) or "segments" not in result:
         raise ValueError("Invalid response from Fireworks AI: missing 'segments'")
@@ -177,10 +180,11 @@ async def breakdown_segments(uuid: str):
         )
 
     segments = result["segments"]
-    # Ensure each segment has a segment_index and effect
+    # Ensure each segment has a segment_index, effect, and segment_id
     for i, seg in enumerate(segments):
         seg["segment_index"] = i
         seg.setdefault("effect", "none")
+        seg["segment_id"] = str(_uuid_module.uuid4())
 
     # Save segments.json
     segments_path = os.path.join(conduit_dir, "segments.json")
@@ -218,6 +222,8 @@ async def update_segments(uuid: str, segments_data: dict = Body(...)):
         base = on_disk[i] if i < len(on_disk) else {}
         merged_seg = {**base, **incoming_seg}
         merged_seg["segment_index"] = i
+        if not merged_seg.get("segment_id"):
+            merged_seg["segment_id"] = str(_uuid_module.uuid4())
         merged.append(merged_seg)
 
     _save_json(segments_path, {"segments": merged})
@@ -286,6 +292,9 @@ async def split_segment(uuid: str, segment_index: int, request: SplitRequest):
     left_seg = dict(seg)
     right_seg = dict(seg)
 
+    left_seg["segment_id"] = str(_uuid_module.uuid4())
+    right_seg["segment_id"] = str(_uuid_module.uuid4())
+
     left_seg["end_time"] = split_point
     left_seg["duration"] = split_point - seg["start_time"]
 
@@ -338,6 +347,7 @@ async def merge_segment(uuid: str, segment_index: int):
     next_seg = segments[segment_index + 1]
 
     merged = dict(seg)
+    merged["segment_id"] = str(_uuid_module.uuid4())
     merged["script_line"] = seg["script_line"] + " " + next_seg["script_line"]
     merged["end_time"] = next_seg["end_time"]
     merged["duration"] = next_seg["end_time"] - seg["start_time"]

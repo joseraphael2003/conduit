@@ -1,6 +1,7 @@
 import os
 import json
 import io
+import uuid
 import pytest
 import pytest_asyncio
 from PIL import Image
@@ -67,7 +68,7 @@ async def test_upload_image_success(async_client, temp_images_dir, cleanup_proje
     data = response.json()
     assert data["segment_index"] == 1
     assert "image_path" in data
-    assert data["image_path"].endswith("images/0001.png") or data["image_path"].endswith("images\\0001.png")
+    assert data["image_path"].endswith(".png")
 
     # Verify file was saved
     assert os.path.exists(data["image_path"])
@@ -353,3 +354,230 @@ async def test_get_images_status_empty_segments(async_client, temp_images_dir, c
     response = await async_client.get(f"/api/v1/projects/{project_uuid}/images/status")
     assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
     assert response.json() == {}
+
+
+@pytest.mark.asyncio
+async def test_upload_image_by_id(async_client, temp_images_dir, cleanup_projects):
+    """POST image upload saves to segment_id-based path."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Image By ID"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    project_dir = os.path.join(temp_images_dir, project_uuid)
+    segments_path = os.path.join(project_dir, "segments.json")
+    segment_id = str(uuid.uuid4())
+    segments_data = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Hello",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+                "segment_id": segment_id,
+            }
+        ]
+    }
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump(segments_data, f)
+
+    png_data = create_test_png(1920, 1080)
+    response = await async_client.post(
+        f"/api/v1/projects/{project_uuid}/images/0",
+        files={"file": ("test.png", io.BytesIO(png_data), "image/png")},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["segment_index"] == 0
+    assert data["image_path"].endswith(f"{segment_id}.png")
+    assert os.path.exists(data["image_path"])
+
+    with open(segments_path, "r", encoding="utf-8") as f:
+        updated = json.load(f)
+    assert updated["segments"][0]["image_path"] == data["image_path"]
+
+
+@pytest.mark.asyncio
+async def test_get_image_by_id(async_client, temp_images_dir, cleanup_projects):
+    """GET image returns the file for segment_id-based path."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Get Image By ID"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    project_dir = os.path.join(temp_images_dir, project_uuid)
+    segments_path = os.path.join(project_dir, "segments.json")
+    segment_id = str(uuid.uuid4())
+    segments_data = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Hello",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+                "segment_id": segment_id,
+            }
+        ]
+    }
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump(segments_data, f)
+
+    png_data = create_test_png(1920, 1080)
+    upload_resp = await async_client.post(
+        f"/api/v1/projects/{project_uuid}/images/0",
+        files={"file": ("test.png", io.BytesIO(png_data), "image/png")},
+    )
+    assert upload_resp.status_code == 200
+
+    get_resp = await async_client.get(f"/api/v1/projects/{project_uuid}/images/0")
+    assert get_resp.status_code == 200
+    assert get_resp.headers.get("content-type") == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_get_images_status_by_id(async_client, temp_images_dir, cleanup_projects):
+    """GET status returns correct map keyed by segment_index using segment_id paths."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Status By ID"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    project_dir = os.path.join(temp_images_dir, project_uuid)
+    segments_path = os.path.join(project_dir, "segments.json")
+    segments_data = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Hello",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+                "segment_id": str(uuid.uuid4()),
+            },
+            {
+                "segment_index": 1,
+                "script_line": "World",
+                "start_time": 1.0,
+                "end_time": 2.0,
+                "duration": 1.0,
+                "segment_id": str(uuid.uuid4()),
+            },
+        ]
+    }
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump(segments_data, f)
+
+    png_data = create_test_png(1920, 1080)
+    upload_resp = await async_client.post(
+        f"/api/v1/projects/{project_uuid}/images/0",
+        files={"file": ("test.png", io.BytesIO(png_data), "image/png")},
+    )
+    assert upload_resp.status_code == 200
+
+    status_resp = await async_client.get(f"/api/v1/projects/{project_uuid}/images/status")
+    assert status_resp.status_code == 200
+    data = status_resp.json()
+    assert data == {"0": True, "1": False}
+
+
+@pytest.mark.asyncio
+async def test_migration_stamps_ids_and_renames_legacy(async_client, temp_images_dir, cleanup_projects):
+    """GET status on legacy project stamps ids, renames 0000.png, and updates image_path."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Migration"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    project_dir = os.path.join(temp_images_dir, project_uuid)
+    images_dir = os.path.join(project_dir, "images")
+    os.makedirs(images_dir, exist_ok=True)
+
+    segments_path = os.path.join(project_dir, "segments.json")
+    segments_data = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Hello",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+            }
+        ]
+    }
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump(segments_data, f)
+
+    legacy_path = os.path.join(images_dir, "0000.png")
+    png_data = create_test_png(1920, 1080)
+    with open(legacy_path, "wb") as f:
+        f.write(png_data)
+
+    status_resp = await async_client.get(f"/api/v1/projects/{project_uuid}/images/status")
+    assert status_resp.status_code == 200
+    data = status_resp.json()
+    assert data == {"0": True}
+
+    with open(segments_path, "r", encoding="utf-8") as f:
+        updated = json.load(f)
+    segment_id = updated["segments"][0].get("segment_id")
+    assert segment_id
+    assert isinstance(segment_id, str)
+    assert len(segment_id) > 0
+
+    new_path = updated["segments"][0]["image_path"]
+    assert new_path.endswith(f"{segment_id}.png")
+    assert os.path.exists(new_path)
+    assert not os.path.exists(legacy_path)
+
+
+@pytest.mark.asyncio
+async def test_migration_idempotent(async_client, temp_images_dir, cleanup_projects):
+    """Second GET status call does not rename files again or change segment_ids."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Migration Idempotent"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    project_dir = os.path.join(temp_images_dir, project_uuid)
+    images_dir = os.path.join(project_dir, "images")
+    os.makedirs(images_dir, exist_ok=True)
+
+    segments_path = os.path.join(project_dir, "segments.json")
+    segments_data = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Hello",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+            }
+        ]
+    }
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump(segments_data, f)
+
+    legacy_path = os.path.join(images_dir, "0000.png")
+    png_data = create_test_png(1920, 1080)
+    with open(legacy_path, "wb") as f:
+        f.write(png_data)
+
+    # First call triggers migration
+    status_resp = await async_client.get(f"/api/v1/projects/{project_uuid}/images/status")
+    assert status_resp.status_code == 200
+
+    with open(segments_path, "r", encoding="utf-8") as f:
+        updated1 = json.load(f)
+    segment_id_1 = updated1["segments"][0]["segment_id"]
+    new_path_1 = updated1["segments"][0]["image_path"]
+
+    # Second call should be idempotent
+    status_resp = await async_client.get(f"/api/v1/projects/{project_uuid}/images/status")
+    assert status_resp.status_code == 200
+
+    with open(segments_path, "r", encoding="utf-8") as f:
+        updated2 = json.load(f)
+    segment_id_2 = updated2["segments"][0]["segment_id"]
+    new_path_2 = updated2["segments"][0]["image_path"]
+
+    assert segment_id_1 == segment_id_2
+    assert new_path_1 == new_path_2
+    assert os.path.exists(new_path_2)
+    assert not os.path.exists(legacy_path)
