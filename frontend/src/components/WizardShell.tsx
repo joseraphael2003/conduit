@@ -13,6 +13,14 @@ import { Step5Video } from "@/pages/Step5Video";
 import { apiBase } from "@/config";
 import { type ProjectState, isStepComplete } from "@/lib/projectState";
 
+interface ProjectResponse {
+  uuid: string;
+  name: string;
+  state: string;
+  created_at: string;
+  updated_at: string;
+}
+
 interface WizardShellProps {
   children?: React.ReactNode;
 }
@@ -55,6 +63,7 @@ export function WizardShell({ children }: WizardShellProps) {
     fidelity: null as number | null,
   });
   const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
+  const [projectName, setProjectName] = useState("");
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const modalRef = useFocusTrap(isWarningModalOpen, () => setIsWarningModalOpen(false), triggerRef);
 
@@ -79,6 +88,23 @@ export function WizardShell({ children }: WizardShellProps) {
       }
     };
     fetchProjectState(controller.signal);
+    return () => controller.abort();
+  }, [uuid]);
+
+  useEffect(() => {
+    if (!uuid) return;
+    const controller = new AbortController();
+    const fetchProjectName = async (signal: AbortSignal) => {
+      try {
+        const response = await fetch(`${apiBase}/projects/${uuid}`, { signal });
+        if (!response.ok) return;
+        const data = (await response.json()) as ProjectResponse;
+        setProjectName(data.name || "");
+      } catch {
+        // silent fail on initial load
+      }
+    };
+    fetchProjectName(controller.signal);
     return () => controller.abort();
   }, [uuid]);
 
@@ -147,7 +173,7 @@ export function WizardShell({ children }: WizardShellProps) {
       <header className="title-bar h-[48px] flex items-center justify-between px-4 bg-[#0F0F14] border-b border-[#2A2A35] shrink-0">
         <div className="flex items-center gap-3">
           <h1 className="font-headline text-2xl text-[#E8E8F0]">Conduit</h1>
-          <span className="font-body text-sm text-[#8A8A9A]">Untitled Project</span>
+          <span className="font-body text-sm text-[#8A8A9A]">{projectName || "Untitled Project"}</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] bg-[#1E1E28] px-2 py-1">

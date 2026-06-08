@@ -1,7 +1,9 @@
 import asyncio
+import json
 import os
 from typing import Any, Dict, List, Optional, Type, Union
 
+import httpx
 from openai import OpenAI
 from openai._exceptions import APIError, AuthenticationError, RateLimitError
 from pydantic import BaseModel
@@ -99,9 +101,14 @@ class FireworksClient:
                 content = response.choices[0].message.content
 
                 if json_schema is not None:
-                    import json
-
-                    return json.loads(content)
+                    try:
+                        return json.loads(content)
+                    except json.JSONDecodeError as exc:
+                        raise APIError(
+                            "AI returned an invalid or truncated JSON response",
+                            request=httpx.Request("POST", f"{self.base_url}/chat/completions"),
+                            body=None,
+                        ) from exc
                 return content
 
             except AuthenticationError:
@@ -126,8 +133,12 @@ class FireworksClient:
                 await asyncio.sleep(backoff_delays[attempt])
 
         # All retries exhausted
-        raise last_exception if last_exception else APIError(
-            "Max retries exceeded for Fireworks API chat completion"
+        if last_exception:
+            raise last_exception
+        raise APIError(
+            "Max retries exceeded for Fireworks API chat completion",
+            request=httpx.Request("POST", f"{self.base_url}/chat/completions"),
+            body=None,
         )
 
 

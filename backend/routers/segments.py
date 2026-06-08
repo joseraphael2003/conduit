@@ -27,6 +27,8 @@ from config import PROJECTS_BASE_DIR
 
 segments_router = APIRouter()
 
+BREAKDOWN_MAX_TOKENS = 16000
+
 
 def _handle_fireworks_error(exc: Exception) -> None:
     """Map Fireworks/OpenAI exceptions to HTTPExceptions."""
@@ -163,6 +165,7 @@ async def breakdown_segments(uuid: str):
         result = await client.chat_completion(
             messages=messages,
             json_schema=Segments,
+            max_tokens=BREAKDOWN_MAX_TOKENS,
         )
     except (AuthenticationError, RateLimitError, APIError) as exc:
         _handle_fireworks_error(exc)
@@ -193,22 +196,32 @@ async def breakdown_segments(uuid: str):
     return Segments(segments=[SegmentBreakdown(**seg) for seg in segments])
 
 
-@segments_router.put("/projects/{uuid}/segments", response_model=Segments)
-async def update_segments(uuid: str, segments_data: Segments):
-    """Accept an edited segment list and write it to segments.json."""
+@segments_router.put("/projects/{uuid}/segments")
+async def update_segments(uuid: str, segments_data: dict = Body(...)):
+    """Accept an edited segment list and write it to segments.json.
+
+    Client edits win; omitted fields are preserved from disk.
+    """
     conduit_dir = _get_conduit_dir(uuid)
     segments_path = os.path.join(conduit_dir, "segments.json")
 
-    # Re-index segments to ensure consistency
-    segments_list = []
-    for i, seg in enumerate(segments_data.segments):
-        seg_dict = seg.model_dump()
-        seg_dict["segment_index"] = i
-        segments_list.append(seg_dict)
+    incoming = segments_data.get("segments", [])
 
-    _save_json(segments_path, {"segments": segments_list})
+    # Load existing segments to preserve omitted fields
+    on_disk = []
+    if os.path.exists(segments_path):
+        on_disk = _load_json(segments_path).get("segments", [])
 
-    return Segments(segments=[SegmentBreakdown(**seg) for seg in segments_list])
+    # Merge incoming over on-disk; client edits win, omitted fields preserved
+    merged = []
+    for i, incoming_seg in enumerate(incoming):
+        base = on_disk[i] if i < len(on_disk) else {}
+        merged_seg = {**base, **incoming_seg}
+        merged_seg["segment_index"] = i
+        merged.append(merged_seg)
+
+    _save_json(segments_path, {"segments": merged})
+    return {"segments": merged}
 
 
 @segments_router.post("/projects/{uuid}/segments/{segment_index}/split", response_model=Segments)
@@ -340,7 +353,7 @@ async def merge_segment(uuid: str, segment_index: int):
     return Segments(segments=segments)
 
 
-@segments_router.get("/projects/{uuid}/segments", response_model=Segments)
+@segments_router.get("/projects/{uuid}/segments")
 async def get_segments(uuid: str):
     """Get all segments for a project."""
     conduit_dir = _get_conduit_dir(uuid)
@@ -353,8 +366,8 @@ async def get_segments(uuid: str):
         )
 
     data = _load_json(segments_path)
-    segments = [SegmentBreakdown(**seg) for seg in data.get("segments", [])]
-    return Segments(segments=segments)
+    segments = data.get("segments", [])
+    return {"segments": segments}
 
 
 @segments_router.put("/projects/{uuid}/segments/{segment_index}/effect")
@@ -436,11 +449,23 @@ async def generate_segment_prompts(uuid: str):
     client = FireworksClient()
     try:
         result = await _generate_prompts_for_batch(segments, characters_data, client, uuid)
-    except (AuthenticationError, RateLimitError, APIError) as exc:
+    except (AuthenticationError, RateLimitError, APIError, ValueError) as exc:
+        if isinstance(exc, ValueError):
+            logging.error("AI returned an unexpected response", exc_info=exc)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="AI returned an unexpected response",
+            ) from exc
         if isinstance(exc, APIError) and _is_token_limit_error(exc):
             try:
                 result = await _generate_prompts_in_batches(segments, characters_data, client, uuid)
-            except (AuthenticationError, RateLimitError, APIError) as batch_exc:
+            except (AuthenticationError, RateLimitError, APIError, ValueError) as batch_exc:
+                if isinstance(batch_exc, ValueError):
+                    logging.error("AI returned an unexpected response", exc_info=batch_exc)
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail="AI returned an unexpected response",
+                    ) from batch_exc
                 _handle_fireworks_error(batch_exc)
         else:
             _handle_fireworks_error(exc)
@@ -531,7 +556,13 @@ async def regenerate_segment_prompt(
     client = FireworksClient()
     try:
         result = await _generate_prompts_for_batch(batch, characters_data, client, uuid)
-    except (AuthenticationError, RateLimitError, APIError) as exc:
+    except (AuthenticationError, RateLimitError, APIError, ValueError) as exc:
+        if isinstance(exc, ValueError):
+            logging.error("AI returned an unexpected response", exc_info=exc)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="AI returned an unexpected response",
+            ) from exc
         _handle_fireworks_error(exc)
 
     if not isinstance(result, list) or len(result) == 0:

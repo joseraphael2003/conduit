@@ -56,6 +56,10 @@ function buildGroups(chars: Character[]): Record<string, Character[]> {
   return groups;
 }
 
+function isSingleDefaultVersion(group: Character[]): boolean {
+  return group.length === 1 && group[0].version_label === "default";
+}
+
 export function Step2Characters() {
   const { uuid } = useParams<{ uuid: string }>();
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -330,8 +334,7 @@ export function Step2Characters() {
         </div>
         <div className="flex items-center gap-3">
           <span className="font-body text-xs text-[#8A8A9A]">
-            AI Model:{" "}
-            <span className="text-[#E8E8F0]">GPT-4</span>
+            Fireworks · <span className="text-[#E8E8F0]">Kimi K2.6</span>
           </span>
           <button
             onClick={handleExtract}
@@ -407,145 +410,186 @@ export function Step2Characters() {
               <div key={baseName} className="border border-[#2A2A35] bg-[#0F0F14]">
                 {/* Group Header */}
                 <div className="bg-[#1A1A24] p-4 border-b border-[#2A2A35]">
-                  <div className="flex items-start justify-between gap-4 mb-3">
-                    <h3 className="font-headline text-lg text-[#E8E8F0]">
-                      {baseName}
-                    </h3>
-                  </div>
-                  <div>
-                    <label className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] block mb-1">
-                      Identity Anchor
-                    </label>
-                    <textarea
-                      value={versions[0]?.identity_anchor || ""}
-                      onChange={(e) =>
-                        handleIdentityAnchorChange(baseName, e.target.value)
-                      }
-                      className="w-full bg-[#0F0F14] border border-[#2A2A35] text-[#E8E8F0] font-body text-sm p-2 resize-none focus:border-[#F0A040] focus:outline-none"
-                      rows={2}
-                      placeholder="Shared identity anchor for all versions..."
-                    />
-                  </div>
+                  <h3 className="font-headline text-lg text-[#E8E8F0]">
+                    {baseName}
+                  </h3>
                 </div>
 
-                {/* Versions Table */}
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-[#1A1A24]">
-                      <tr>
-                        <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
-                          Name
-                        </th>
-                        <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
-                          Version
-                        </th>
-                        <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
-                          Appears From
-                        </th>
-                        <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
-                          Description
-                        </th>
-                        <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
-                          Type
-                        </th>
-                        <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
-                          Importance
-                        </th>
-                        <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {versions.map((char) => (
-                        <tr
-                          key={char.name}
-                          className="border-b border-[#2A2A35] last:border-b-0"
-                        >
-                          <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 whitespace-nowrap">
-                            {char.name}
-                          </td>
-                          <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 whitespace-nowrap">
-                            <input
-                              type="text"
-                              value={char.version_label || ""}
-                              onChange={(e) =>
-                                handleVersionFieldChange(
-                                  char.name,
-                                  "version_label",
-                                  e.target.value
-                                )
-                              }
-                              className="w-[120px] bg-[#0F0F14] border border-[#2A2A35] text-[#E8E8F0] font-body text-sm p-2 focus:border-[#F0A040] focus:outline-none"
-                              placeholder="e.g. default"
-                            />
-                          </td>
-                          <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 whitespace-nowrap">
-                            <input
-                              type="text"
-                              value={char.appears_from || ""}
-                              onChange={(e) =>
-                                handleVersionFieldChange(
-                                  char.name,
-                                  "appears_from",
-                                  e.target.value
-                                )
-                              }
-                              className="w-[140px] bg-[#0F0F14] border border-[#2A2A35] text-[#E8E8F0] font-body text-sm p-2 focus:border-[#F0A040] focus:outline-none"
-                              placeholder="e.g. 00:01:23"
-                            />
-                          </td>
-                          <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 min-w-[200px]">
-                            <textarea
-                              value={char.description}
-                              onChange={(e) =>
-                                handleVersionFieldChange(
-                                  char.name,
-                                  "description",
-                                  e.target.value
-                                )
-                              }
-                              className="w-full bg-[#0F0F14] border border-[#2A2A35] text-[#E8E8F0] font-body text-sm p-2 resize-none focus:border-[#F0A040] focus:outline-none"
-                              rows={3}
-                            />
-                          </td>
-                          <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 whitespace-nowrap">
-                            <span className="inline-flex items-center px-2 py-0.5 font-body text-xs font-semibold tracking-wide uppercase border text-[#06B6D4] border-[#06B6D4]/20 bg-[#06B6D4]/10">
-                              {char.type}
-                            </span>
-                          </td>
-                          <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 whitespace-nowrap">
-                            <span
-                              className={cn(
-                                "inline-flex items-center px-2 py-0.5 font-body text-xs font-semibold tracking-wide uppercase border",
-                                char.importance === "major"
-                                  ? "text-[#F0A040] border-[#F0A040]/20 bg-[#F0A040]/10"
-                                  : "text-[#5A5A6A] border-[#5A5A6A]/20 bg-[#5A5A6A]/10"
-                              )}
+                {isSingleDefaultVersion(versions) ? (
+                  <div className="p-4 flex items-start gap-4">
+                    <div className="flex flex-col gap-2 shrink-0">
+                      <span className="font-body text-sm text-[#E8E8F0]">
+                        {versions[0].name}
+                      </span>
+                      <span className="inline-flex items-center px-2 py-0.5 font-body text-xs font-semibold tracking-wide uppercase border text-[#06B6D4] border-[#06B6D4]/20 bg-[#06B6D4]/10">
+                        {versions[0].type}
+                      </span>
+                      <span
+                        className={cn(
+                          "inline-flex items-center px-2 py-0.5 font-body text-xs font-semibold tracking-wide uppercase border",
+                          versions[0].importance === "major"
+                            ? "text-[#F0A040] border-[#F0A040]/20 bg-[#F0A040]/10"
+                            : "text-[#5A5A6A] border-[#5A5A6A]/20 bg-[#5A5A6A]/10"
+                        )}
+                      >
+                        {versions[0].importance}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <textarea
+                        value={versions[0].description}
+                        onChange={(e) =>
+                          handleVersionFieldChange(
+                            versions[0].name,
+                            "description",
+                            e.target.value
+                          )
+                        }
+                        className="w-full bg-[#0F0F14] border border-[#2A2A35] text-[#E8E8F0] font-body text-sm p-2 resize-y focus:border-[#F0A040] focus:outline-none"
+                        rows={4}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Identity Anchor */}
+                    <div className="bg-[#1A1A24] p-4 border-b border-[#2A2A35]">
+                      <div>
+                        <label className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] block mb-1">
+                          Identity Anchor
+                        </label>
+                        <textarea
+                          value={versions[0]?.identity_anchor || ""}
+                          onChange={(e) =>
+                            handleIdentityAnchorChange(baseName, e.target.value)
+                          }
+                          className="w-full bg-[#0F0F14] border border-[#2A2A35] text-[#E8E8F0] font-body text-sm p-2 resize-none focus:border-[#F0A040] focus:outline-none"
+                          rows={2}
+                          placeholder="Shared identity anchor for all versions..."
+                        />
+                      </div>
+                    </div>
+
+                    {/* Versions Table */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-[#1A1A24]">
+                          <tr>
+                            <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
+                              Name
+                            </th>
+                            <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
+                              Version
+                            </th>
+                            <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
+                              Appears From
+                            </th>
+                            <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
+                              Description
+                            </th>
+                            <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
+                              Type
+                            </th>
+                            <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
+                              Importance
+                            </th>
+                            <th className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A] px-4 py-3 text-left border-b border-[#2A2A35]">
+                              Actions
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {versions.map((char) => (
+                            <tr
+                              key={char.name}
+                              className="border-b border-[#2A2A35] last:border-b-0"
                             >
-                              {char.importance}
-                            </span>
-                          </td>
-                          <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 whitespace-nowrap">
-                            <button
-                              onClick={() => handleRemoveVersion(char.name)}
-                              disabled={versions.length <= 1}
-                              className={cn(
-                                "flex items-center gap-1 px-2 py-1 font-body text-xs font-semibold tracking-wide uppercase",
-                                "bg-[#1A1A24] text-[#EF4444] border border-[#2A2A35] hover:bg-[#1E1E28]",
-                                "disabled:opacity-50 disabled:cursor-not-allowed"
-                              )}
-                              aria-label={`Remove version ${char.name}`}
-                            >
-                              <Trash size={14} weight="regular" />
-                              Remove
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                              <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 whitespace-nowrap">
+                                {char.name}
+                              </td>
+                              <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 whitespace-nowrap">
+                                <input
+                                  type="text"
+                                  value={char.version_label || ""}
+                                  onChange={(e) =>
+                                    handleVersionFieldChange(
+                                      char.name,
+                                      "version_label",
+                                      e.target.value
+                                    )
+                                  }
+                                  className="w-[120px] bg-[#0F0F14] border border-[#2A2A35] text-[#E8E8F0] font-body text-sm p-2 focus:border-[#F0A040] focus:outline-none"
+                                  placeholder="e.g. default"
+                                />
+                              </td>
+                              <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 whitespace-nowrap">
+                                <input
+                                  type="text"
+                                  value={char.appears_from || ""}
+                                  onChange={(e) =>
+                                    handleVersionFieldChange(
+                                      char.name,
+                                      "appears_from",
+                                      e.target.value
+                                    )
+                                  }
+                                  className="w-[140px] bg-[#0F0F14] border border-[#2A2A35] text-[#E8E8F0] font-body text-sm p-2 focus:border-[#F0A040] focus:outline-none"
+                                  placeholder="e.g. after the 7-year time skip"
+                                />
+                              </td>
+                              <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 min-w-[200px]">
+                                <textarea
+                                  value={char.description}
+                                  onChange={(e) =>
+                                    handleVersionFieldChange(
+                                      char.name,
+                                      "description",
+                                      e.target.value
+                                    )
+                                  }
+                                  className="w-full bg-[#0F0F14] border border-[#2A2A35] text-[#E8E8F0] font-body text-sm p-2 resize-y focus:border-[#F0A040] focus:outline-none"
+                                  rows={4}
+                                />
+                              </td>
+                              <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 whitespace-nowrap">
+                                <span className="inline-flex items-center px-2 py-0.5 font-body text-xs font-semibold tracking-wide uppercase border text-[#06B6D4] border-[#06B6D4]/20 bg-[#06B6D4]/10">
+                                  {char.type}
+                                </span>
+                              </td>
+                              <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 whitespace-nowrap">
+                                <span
+                                  className={cn(
+                                    "inline-flex items-center px-2 py-0.5 font-body text-xs font-semibold tracking-wide uppercase border",
+                                    char.importance === "major"
+                                      ? "text-[#F0A040] border-[#F0A040]/20 bg-[#F0A040]/10"
+                                      : "text-[#5A5A6A] border-[#5A5A6A]/20 bg-[#5A5A6A]/10"
+                                  )}
+                                >
+                                  {char.importance}
+                                </span>
+                              </td>
+                              <td className="font-body text-sm text-[#E8E8F0] px-4 py-3 whitespace-nowrap">
+                                <button
+                                  onClick={() => handleRemoveVersion(char.name)}
+                                  disabled={versions.length <= 1}
+                                  className={cn(
+                                    "flex items-center gap-1 px-2 py-1 font-body text-xs font-semibold tracking-wide uppercase",
+                                    "bg-[#1A1A24] text-[#EF4444] border border-[#2A2A35] hover:bg-[#1E1E28]",
+                                    "disabled:opacity-50 disabled:cursor-not-allowed"
+                                  )}
+                                  aria-label={`Remove version ${char.name}`}
+                                >
+                                  <Trash size={14} weight="regular" />
+                                  Remove
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
 
                 {/* Add Version */}
                 <div className="p-3 border-t border-[#2A2A35]">

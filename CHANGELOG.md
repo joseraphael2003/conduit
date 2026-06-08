@@ -17,13 +17,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Pass 2 Rule 9 (within-version consistency)** (`backend/services/prompts.py`) — Updated segment prompt system prompt to require that consecutive segments featuring the same character version must keep visual details consistent (clothing, age expression, props) unless the script explicitly describes a change.
-- **Character-edit invalidation** (`backend/routers/characters.py`, `backend/services/state.py`) — `PUT /api/v1/projects/{uuid}/characters` now resets downstream state (Steps 3–5) and deletes `segments.json` when characters are edited. Previously edits did not invalidate downstream segments, causing stale prompts.
+- **Character-edit invalidation** (`backend/routers/characters.py`, `backend/services/state.py`) — `PUT /api/v1/projects/{uuid}/characters` calls `invalidate_downstream(2)`, resetting the project to `step_1_complete` and clearing `step_2_call_2_complete` plus all Step 3–4 sub-steps (forcing Call 2 + segments to re-run). Deletes `segments.json` when characters are edited. Previously edits did not invalidate downstream segments, causing stale prompts.
 
 ### Fixed
 - **Backward-compatible schema loading for pre-version `characters.json`** (`backend/models/characters.py`) — Projects with legacy `characters.json` (lacking `base_name`, `version_label`, `version_index`, `identity_anchor`, `appears_from`, `front_profile_prompt`, `turnaround_prompt`) load without `ValidationError`. Missing fields default to: `base_name` = `name`, `version_label` = `"default"`, `version_index` = `0`, `identity_anchor` = `""`, `appears_from` = `""`, prompts = `""`. Call 2 and GET endpoints both normalize on read.
 
 ### Testing
 - 172 backend tests passed (0 failures); `tsc --noEmit` → 0 errors.
+
+## [0.8.1] — 2026-06-08 — Post-Release Fixes
+
+### Fixed
+- **Breakdown truncation / 500** (`backend/routers/segments.py`, `backend/services/fireworks.py`) — Pass 1 breakdown now uses `max_tokens=16000` (up from default) to prevent mid-segment truncation. Centralized JSON-parse guard in `fireworks.py` catches malformed AI responses with `try/except json.JSONDecodeError`, re-raising as `APIError` so callers map it to 502 instead of leaking a 500.
+- **PUT prompt preservation** (`backend/routers/segments.py`) — `PUT /segments` now merges incoming fields with on-disk data (`{**on_disk[idx], **incoming[idx]}`) so `segment_prompt`, `characters_present`, and `image_path` are preserved when the client omits them.
+- **Step 3 prompt visibility** (`backend/routers/segments.py`, `frontend/src/pages/Step3Segments.tsx`) — `GET /segments` no longer strips optional fields via `response_model=Segments`; returns raw dicts so `segment_prompt`, `characters_present`, and `image_path` are always present. Frontend aligned field names from legacy `prompt`/`characters` to `segment_prompt`/`characters_present`.
+- **Title bar project name** (`frontend/src/components/WizardShell.tsx`) — Fetches `GET /projects/{uuid}` and displays the real project name in the title bar instead of hardcoded `Untitled Project`.
+
+### Changed
+- **Step 2 / Step 3 UI polish** (`frontend/src/pages/Step2Characters.tsx`, `frontend/src/pages/Step3Segments.tsx`) — Step 2: description textarea is now vertically resizable (`resize-y`, 4 rows), single-default-version groups render a compact row instead of a full card, `appears_from` placeholder changed to a narrative hint, AI model label corrected to `Fireworks · Kimi K2.6`. Step 3: action buttons right-aligned (`justify-end`) with secondary-on-left / primary-on-right ordering, empty state shows an inline primary CTA.
+
+### Testing
+- 181 backend tests passed (0 failures); `tsc --noEmit` → 0 errors.
 
 ## [0.7.3] — 2026-06-08 — Test Isolation + Delete Atomicity
 
@@ -733,9 +747,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## File Inventory
 
-### Backend (37 Python files)
+### Backend (39 Python files)
 ```
 backend/main.py
+backend/config.py
+backend/run_test_backend.py
 backend/models/database.py
 backend/models/project.py
 backend/models/state.py
@@ -837,14 +853,15 @@ frontend/components.json
 | **v0.7.2** | 151 | 73* | 224 |
 | **v0.7.3** | 154 | 73* | 227 |
 | **v0.8.0** | 172 | 73* | 245 |
+| **v0.8.1** | 181 | 73* | 254 |
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.8.0 — 172 tests)
-- `test_fireworks.py` — 9 tests (client, base_url, retry logic, json_schema, error handling)
+### Backend Test Breakdown (v0.8.1 — 181 tests)
+- `test_fireworks.py` — 10 tests (client, base_url, retry logic, json_schema, error handling, invalid-JSON guard)
 - `test_characters.py` — 22 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2)
 - `test_character_timeline.py` — 6 tests (happy path, 409 no-characters, 502 duplicate name, 502 missing person, 502 inconsistent anchor, single version default)
-- `test_segments.py` — 24 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index)
+- `test_segments.py` — 32 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502)
 - `test_images.py` — 13 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status)
 - `test_projects.py` — 17 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript, voiceover re-upload, invalidate_downstream, delete atomicity)
 - `test_video.py` — 47 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters)

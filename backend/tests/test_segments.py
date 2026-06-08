@@ -3,6 +3,7 @@ import json
 import pytest
 import httpx
 import respx
+from unittest.mock import patch
 
 @pytest.mark.asyncio
 async def test_breakdown_segments(async_client, cleanup_projects, temp_projects_dir):
@@ -1478,3 +1479,334 @@ async def test_regenerate_bad_index(async_client, cleanup_projects, temp_project
     resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/5/prompt")
     assert resp.status_code == 400
     assert "Invalid segment_index" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_breakdown_max_tokens(async_client, cleanup_projects, temp_projects_dir):
+    """POST breakdown sends max_tokens=16000 to Fireworks."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Max Tokens"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    with open(os.path.join(conduit_dir, "source_of_truth_script.txt"), "w", encoding="utf-8") as f:
+        f.write("Hello world.")
+    with open(os.path.join(conduit_dir, "words.json"), "w", encoding="utf-8") as f:
+        json.dump({"words": [{"word": "Hello", "start": 0.0, "end": 0.5}, {"word": "world", "start": 0.6, "end": 1.0}]}, f)
+
+    with respx.mock:
+        route = respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "segments": [
+                                        {
+                                            "segment_index": 0,
+                                            "script_line": "Hello world.",
+                                            "start_time": 0.0,
+                                            "end_time": 1.0,
+                                            "duration": 1.0,
+                                        }
+                                    ]
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/breakdown")
+        assert resp.status_code == 200
+
+        request = route.calls.last.request
+        body = json.loads(request.content)
+        assert body["max_tokens"] == 16000
+
+
+@pytest.mark.asyncio
+async def test_breakdown_invalid_json_502(async_client, cleanup_projects, temp_projects_dir):
+    """POST breakdown returns 502 when Fireworks returns invalid JSON."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Invalid JSON"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    with open(os.path.join(conduit_dir, "source_of_truth_script.txt"), "w", encoding="utf-8") as f:
+        f.write("Hello.")
+    with open(os.path.join(conduit_dir, "words.json"), "w", encoding="utf-8") as f:
+        json.dump({"words": [{"word": "Hello", "start": 0.0, "end": 0.5}]}, f)
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "not json {",
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/breakdown")
+        assert resp.status_code == 502
+        assert "AI request failed" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_get_returns_prompt_fields(async_client, cleanup_projects, temp_projects_dir):
+    """GET /segments returns segment_prompt, characters_present, and image_path."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "GET Prompts"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Hello world.",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+                "segment_prompt": "A sunny meadow.",
+                "characters_present": ["Alice"],
+                "image_path": "projects/test/images/0000.png",
+            }
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    resp = await async_client.get(f"/api/v1/projects/{project_uuid}/segments")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["segments"][0]["segment_prompt"] == "A sunny meadow."
+    assert data["segments"][0]["characters_present"] == ["Alice"]
+    assert data["segments"][0]["image_path"] == "projects/test/images/0000.png"
+
+
+@pytest.mark.asyncio
+async def test_put_persists_incoming_prompt_edit(async_client, cleanup_projects, temp_projects_dir):
+    """PUT /segments persists edited segment_prompt and characters_present."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "PUT Prompt Edit"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Original line.",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+                "segment_prompt": "Original prompt",
+                "characters_present": ["Alice"],
+            }
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    updated = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Edited line.",
+                "segment_prompt": "Edited prompt",
+                "characters_present": ["Bob"],
+            }
+        ]
+    }
+    put_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/segments", json=updated)
+    assert put_resp.status_code == 200
+
+    get_resp = await async_client.get(f"/api/v1/projects/{project_uuid}/segments")
+    assert get_resp.status_code == 200
+    data = get_resp.json()
+    assert data["segments"][0]["script_line"] == "Edited line."
+    assert data["segments"][0]["segment_prompt"] == "Edited prompt"
+    assert data["segments"][0]["characters_present"] == ["Bob"]
+
+
+@pytest.mark.asyncio
+async def test_put_preserves_omitted_fields(async_client, cleanup_projects, temp_projects_dir):
+    """PUT /segments preserves omitted prompt fields from disk."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "PUT Preserve"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Original line.",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+                "segment_prompt": "Original prompt",
+                "characters_present": ["Alice"],
+                "image_path": "projects/test/images/0000.png",
+            }
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    updated = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Edited line.",
+            }
+        ]
+    }
+    put_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/segments", json=updated)
+    assert put_resp.status_code == 200
+
+    get_resp = await async_client.get(f"/api/v1/projects/{project_uuid}/segments")
+    assert get_resp.status_code == 200
+    data = get_resp.json()
+    assert data["segments"][0]["script_line"] == "Edited line."
+    assert data["segments"][0]["segment_prompt"] == "Original prompt"
+    assert data["segments"][0]["characters_present"] == ["Alice"]
+    assert data["segments"][0]["image_path"] == "projects/test/images/0000.png"
+
+
+@pytest.mark.asyncio
+async def test_pre_prompt_safety(async_client, cleanup_projects, temp_projects_dir):
+    """GET and PUT on pre-prompt segments do not 422."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Pre-Prompt"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Hello world.",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+            }
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    get_resp = await async_client.get(f"/api/v1/projects/{project_uuid}/segments")
+    assert get_resp.status_code == 200
+
+    put_payload = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Hello world.",
+            }
+        ]
+    }
+    put_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/segments", json=put_payload)
+    assert put_resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_pass2_valueerror_502(async_client, cleanup_projects, temp_projects_dir):
+    """POST /segments/prompts returns 502 when _generate_prompts_for_batch raises ValueError."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Pass2 ValueError"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Hello.",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+            }
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    characters = {"characters": [{"name": "Alice", "type": "speaking", "importance": "major", "description": "A girl"}]}
+    with open(os.path.join(temp_projects_dir, project_uuid, "characters.json"), "w", encoding="utf-8") as f:
+        json.dump(characters, f)
+
+    with patch("routers.segments._generate_prompts_for_batch", side_effect=ValueError("bad response")):
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/prompts")
+        assert resp.status_code == 502
+        assert "AI returned an unexpected response" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_regenerate_valueerror_502(async_client, cleanup_projects, temp_projects_dir):
+    """POST /segments/{index}/prompt returns 502 when _generate_prompts_for_batch raises ValueError."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Regen ValueError"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Hello.",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+                "segment_prompt": "Original prompt",
+                "characters_present": ["Alice"],
+            }
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    characters = {"characters": [{"name": "Alice", "type": "speaking", "importance": "major", "description": "A girl"}]}
+    with open(os.path.join(temp_projects_dir, project_uuid, "characters.json"), "w", encoding="utf-8") as f:
+        json.dump(characters, f)
+
+    with patch("routers.segments._generate_prompts_for_batch", side_effect=ValueError("bad response")):
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/0/prompt")
+        assert resp.status_code == 502
+        assert "AI returned an unexpected response" in resp.json()["detail"]
+

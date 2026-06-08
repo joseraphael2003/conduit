@@ -4,6 +4,7 @@ import pytest
 import httpx
 import respx
 from pydantic import BaseModel
+from openai._exceptions import APIError
 
 from services.fireworks import FireworksClient
 
@@ -314,3 +315,40 @@ async def test_fireworks_chat_completion_retry_503(fireworks_client):
 
         assert result == "Service ok"
         assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_fireworks_chat_completion_invalid_json_guard(fireworks_client):
+    """Invalid JSON content from AI raises APIError, not JSONDecodeError."""
+    class FlatResponse(BaseModel):
+        summary: str
+
+    with respx.mock:
+        route = respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "not json {",
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+
+        with pytest.raises(APIError):
+            await fireworks_client.chat_completion(
+                messages=[{"role": "user", "content": "Summarize"}],
+                json_schema=FlatResponse,
+            )
+

@@ -33,10 +33,8 @@ interface Segment {
   start_time: number;
   end_time: number;
   duration: number;
-  prompt: string;
-  characters: string[];
-  segment_prompt?: string;
-  characters_present?: string[];
+  segment_prompt: string;
+  characters_present: string[];
 }
 
 export function Step3Segments() {
@@ -161,7 +159,7 @@ export function Step3Segments() {
 
   const handlePromptChange = (index: number, newPrompt: string) => {
     setSegments((prev) =>
-      prev.map((seg, i) => (i === index ? { ...seg, prompt: newPrompt } : seg))
+      prev.map((seg, i) => (i === index ? { ...seg, segment_prompt: newPrompt } : seg))
     );
   };
 
@@ -187,7 +185,7 @@ export function Step3Segments() {
       // Apply local edit to the matching segment
       const updatedSegments = fullSegments.map((seg) =>
         seg.segment_index === segment.segment_index
-          ? { ...seg, prompt: segment.prompt }
+          ? { ...seg, segment_prompt: segment.segment_prompt }
           : seg
       );
 
@@ -369,24 +367,7 @@ export function Step3Segments() {
       )}
 
       {/* Actions */}
-      <div className="flex items-center gap-4">
-        <button
-          onClick={handleBreakdown}
-          disabled={loading}
-          className={cn(
-            "flex items-center gap-2 px-6 py-2.5 font-body text-sm font-semibold tracking-wide uppercase",
-            "bg-[#F0A040] text-[#0F0F14] hover:bg-[#F5B860]",
-            "disabled:opacity-50 disabled:cursor-not-allowed"
-          )}
-        >
-          {loading ? (
-            <AmberBar />
-          ) : (
-            <Wrench size={16} weight="regular" />
-          )}
-          Generate Segments
-        </button>
-
+      <div className="flex items-center justify-end gap-4">
         {breakdownDone && (
           <button
             onClick={handleGeneratePrompts}
@@ -405,6 +386,23 @@ export function Step3Segments() {
             Generate Prompts
           </button>
         )}
+
+        <button
+          onClick={handleBreakdown}
+          disabled={loading}
+          className={cn(
+            "flex items-center gap-2 px-6 py-2.5 font-body text-sm font-semibold tracking-wide uppercase",
+            "bg-[#F0A040] text-[#0F0F14] hover:bg-[#F5B860]",
+            "disabled:opacity-50 disabled:cursor-not-allowed"
+          )}
+        >
+          {loading ? (
+            <AmberBar />
+          ) : (
+            <Wrench size={16} weight="regular" />
+          )}
+          Generate Segments
+        </button>
       </div>
 
       {/* Segment Loading */}
@@ -464,7 +462,7 @@ export function Step3Segments() {
                   <td className="px-3 py-3">
                     <div className="relative">
                       <textarea
-                        value={segment.prompt || ""}
+                        value={segment.segment_prompt || ""}
                         onChange={(e) => handlePromptChange(index, e.target.value)}
                         onBlur={() => handlePromptBlur(index)}
                         className={cn(
@@ -615,6 +613,22 @@ export function Step3Segments() {
           <p className="font-body text-sm text-[#8A8A9A] text-center max-w-[360px]">
             No segments yet. Click "Generate Segments" to break down the script into segments.
           </p>
+          <button
+            onClick={handleBreakdown}
+            disabled={loading}
+            className={cn(
+              "flex items-center gap-2 px-6 py-2.5 font-body text-sm font-semibold tracking-wide uppercase",
+              "bg-[#F0A040] text-[#0F0F14] hover:bg-[#F5B860]",
+              "disabled:opacity-50 disabled:cursor-not-allowed"
+            )}
+          >
+            {loading ? (
+              <AmberBar />
+            ) : (
+              <Wrench size={16} weight="regular" />
+            )}
+            Generate Segments
+          </button>
         </div>
       )}
     </div>
