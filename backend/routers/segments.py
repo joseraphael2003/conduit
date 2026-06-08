@@ -224,7 +224,7 @@ async def update_segments(uuid: str, segments_data: dict = Body(...)):
     return {"segments": merged}
 
 
-@segments_router.post("/projects/{uuid}/segments/{segment_index}/split", response_model=Segments)
+@segments_router.post("/projects/{uuid}/segments/{segment_index}/split")
 async def split_segment(uuid: str, segment_index: int, request: SplitRequest):
     """Split a segment into two at the specified word index or timestamp."""
     conduit_dir = _get_conduit_dir(uuid)
@@ -237,7 +237,7 @@ async def split_segment(uuid: str, segment_index: int, request: SplitRequest):
         )
 
     data = _load_json(segments_path)
-    segments = [SegmentBreakdown(**seg) for seg in data.get("segments", [])]
+    segments = data.get("segments", [])
 
     if segment_index < 0 or segment_index >= len(segments):
         raise HTTPException(
@@ -250,7 +250,7 @@ async def split_segment(uuid: str, segment_index: int, request: SplitRequest):
     # Determine split point
     if request.timestamp is not None:
         split_point = request.timestamp
-        if split_point <= seg.start_time or split_point >= seg.end_time:
+        if split_point <= seg["start_time"] or split_point >= seg["end_time"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Split timestamp must be within segment bounds",
@@ -271,7 +271,7 @@ async def split_segment(uuid: str, segment_index: int, request: SplitRequest):
                 detail="Invalid word_index",
             )
         split_point = words[request.word_index]["start"]
-        if split_point <= seg.start_time or split_point >= seg.end_time:
+        if split_point <= seg["start_time"] or split_point >= seg["end_time"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Split point must be within segment bounds",
@@ -283,32 +283,37 @@ async def split_segment(uuid: str, segment_index: int, request: SplitRequest):
         )
 
     # Split the segment
-    left_seg = seg.model_dump()
-    right_seg = seg.model_dump()
+    left_seg = dict(seg)
+    right_seg = dict(seg)
 
     left_seg["end_time"] = split_point
-    left_seg["duration"] = split_point - seg.start_time
+    left_seg["duration"] = split_point - seg["start_time"]
 
     right_seg["start_time"] = split_point
-    right_seg["duration"] = seg.end_time - split_point
+    right_seg["duration"] = seg["end_time"] - split_point
+
+    # Reset prompt fields on both halves
+    left_seg["segment_prompt"] = ""
+    left_seg["characters_present"] = []
+    left_seg.pop("image_path", None)
+    right_seg["segment_prompt"] = ""
+    right_seg["characters_present"] = []
+    right_seg.pop("image_path", None)
 
     # Replace original segment with two new segments
-    segments.pop(segment_index)
-    segments.insert(segment_index, SegmentBreakdown(**right_seg))
-    segments.insert(segment_index, SegmentBreakdown(**left_seg))
+    segments[segment_index : segment_index + 1] = [left_seg, right_seg]
 
     # Re-index
     for i, s in enumerate(segments):
-        s.segment_index = i
+        s["segment_index"] = i
 
     # Save
-    segments_list = [s.model_dump() for s in segments]
-    _save_json(segments_path, {"segments": segments_list})
+    _save_json(segments_path, {"segments": segments})
 
-    return Segments(segments=segments)
+    return {"segments": segments}
 
 
-@segments_router.post("/projects/{uuid}/segments/{segment_index}/merge", response_model=Segments)
+@segments_router.post("/projects/{uuid}/segments/{segment_index}/merge")
 async def merge_segment(uuid: str, segment_index: int):
     """Merge a segment with the next segment."""
     conduit_dir = _get_conduit_dir(uuid)
@@ -321,7 +326,7 @@ async def merge_segment(uuid: str, segment_index: int):
         )
 
     data = _load_json(segments_path)
-    segments = [SegmentBreakdown(**seg) for seg in data.get("segments", [])]
+    segments = data.get("segments", [])
 
     if segment_index < 0 or segment_index >= len(segments) - 1:
         raise HTTPException(
@@ -332,25 +337,28 @@ async def merge_segment(uuid: str, segment_index: int):
     seg = segments[segment_index]
     next_seg = segments[segment_index + 1]
 
-    merged = seg.model_dump()
-    merged["script_line"] = seg.script_line + " " + next_seg.script_line
-    merged["end_time"] = next_seg.end_time
-    merged["duration"] = next_seg.end_time - seg.start_time
+    merged = dict(seg)
+    merged["script_line"] = seg["script_line"] + " " + next_seg["script_line"]
+    merged["end_time"] = next_seg["end_time"]
+    merged["duration"] = next_seg["end_time"] - seg["start_time"]
+
+    # Keep effect from first segment (already copied via dict(seg))
+    # Reset prompt fields on merged segment
+    merged["segment_prompt"] = ""
+    merged["characters_present"] = []
+    merged.pop("image_path", None)
 
     # Replace two segments with merged
-    segments.pop(segment_index + 1)
-    segments.pop(segment_index)
-    segments.insert(segment_index, SegmentBreakdown(**merged))
+    segments[segment_index : segment_index + 2] = [merged]
 
     # Re-index
     for i, s in enumerate(segments):
-        s.segment_index = i
+        s["segment_index"] = i
 
     # Save
-    segments_list = [s.model_dump() for s in segments]
-    _save_json(segments_path, {"segments": segments_list})
+    _save_json(segments_path, {"segments": segments})
 
-    return Segments(segments=segments)
+    return {"segments": segments}
 
 
 @segments_router.get("/projects/{uuid}/segments")

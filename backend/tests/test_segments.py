@@ -1810,3 +1810,195 @@ async def test_regenerate_valueerror_502(async_client, cleanup_projects, temp_pr
         assert resp.status_code == 502
         assert "AI returned an unexpected response" in resp.json()["detail"]
 
+
+@pytest.mark.asyncio
+async def test_split_preserves_other_segment_fields(async_client, cleanup_projects, temp_projects_dir):
+    """Split resets prompt fields on new halves but preserves them on untouched segments."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Split Preserve"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "First line",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+                "segment_prompt": "prompt for segment 0",
+                "characters_present": ["Alice (young)"],
+                "image_path": "images/0000.png",
+                "effect": "pan_left",
+            },
+            {
+                "segment_index": 1,
+                "script_line": "Second line",
+                "start_time": 1.0,
+                "end_time": 4.0,
+                "duration": 3.0,
+                "segment_prompt": "old prompt",
+                "characters_present": ["Bob"],
+                "image_path": "images/0001.png",
+                "effect": "zoom_in",
+            },
+            {
+                "segment_index": 2,
+                "script_line": "Third line",
+                "start_time": 4.0,
+                "end_time": 5.0,
+                "duration": 1.0,
+            },
+            {
+                "segment_index": 3,
+                "script_line": "Fourth line",
+                "start_time": 5.0,
+                "end_time": 6.0,
+                "duration": 1.0,
+                "segment_prompt": "prompt for segment 3",
+                "characters_present": ["Alice (young)"],
+                "image_path": "images/0003.png",
+                "effect": "pan_right",
+            },
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    resp = await async_client.post(
+        f"/api/v1/projects/{project_uuid}/segments/1/split",
+        json={"timestamp": 2.0}
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    segs = data["segments"]
+
+    # Count increased by 1
+    assert len(segs) == 5
+
+    # segment_index contiguous 0..4
+    assert [s["segment_index"] for s in segs] == [0, 1, 2, 3, 4]
+
+    # Segment 0 untouched
+    assert segs[0]["segment_prompt"] == "prompt for segment 0"
+    assert segs[0]["characters_present"] == ["Alice (young)"]
+    assert segs[0]["image_path"] == "images/0000.png"
+    assert segs[0]["effect"] == "pan_left"
+
+    # Segment 4 (was originally segment 3) untouched
+    assert segs[4]["segment_prompt"] == "prompt for segment 3"
+    assert segs[4]["characters_present"] == ["Alice (young)"]
+    assert segs[4]["image_path"] == "images/0003.png"
+    assert segs[4]["effect"] == "pan_right"
+
+    # New left half (index 1)
+    assert segs[1]["segment_prompt"] == ""
+    assert segs[1]["characters_present"] == []
+    assert "image_path" not in segs[1]
+    assert segs[1]["effect"] == "zoom_in"
+    assert segs[1]["start_time"] == 1.0
+    assert segs[1]["end_time"] == 2.0
+    assert segs[1]["duration"] == 1.0
+
+    # New right half (index 2)
+    assert segs[2]["segment_prompt"] == ""
+    assert segs[2]["characters_present"] == []
+    assert "image_path" not in segs[2]
+    assert segs[2]["effect"] == "zoom_in"
+    assert segs[2]["start_time"] == 2.0
+    assert segs[2]["end_time"] == 4.0
+    assert segs[2]["duration"] == 2.0
+
+
+@pytest.mark.asyncio
+async def test_merge_preserves_other_segment_fields(async_client, cleanup_projects, temp_projects_dir):
+    """Merge resets prompt fields on merged result but preserves them on untouched segments."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Merge Preserve"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "First line",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+                "segment_prompt": "prompt for segment 0",
+                "characters_present": ["Alice (young)"],
+                "image_path": "images/0000.png",
+                "effect": "pan_left",
+            },
+            {
+                "segment_index": 1,
+                "script_line": "Second line",
+                "start_time": 1.0,
+                "end_time": 2.0,
+                "duration": 1.0,
+                "segment_prompt": "old prompt",
+                "characters_present": ["Bob"],
+                "image_path": "images/0001.png",
+                "effect": "zoom_in",
+            },
+            {
+                "segment_index": 2,
+                "script_line": "Third line",
+                "start_time": 2.0,
+                "end_time": 3.0,
+                "duration": 1.0,
+                "segment_prompt": "prompt for segment 2",
+                "characters_present": ["Charlie"],
+                "image_path": "images/0002.png",
+                "effect": "pan_up",
+            },
+            {
+                "segment_index": 3,
+                "script_line": "Fourth line",
+                "start_time": 3.0,
+                "end_time": 4.0,
+                "duration": 1.0,
+                "segment_prompt": "prompt for segment 3",
+                "characters_present": ["Alice (young)"],
+                "image_path": "images/0003.png",
+                "effect": "pan_right",
+            },
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/1/merge")
+    assert resp.status_code == 200
+    data = resp.json()
+    segs = data["segments"]
+
+    # Count decreased by 1
+    assert len(segs) == 3
+
+    # segment_index contiguous 0..2
+    assert [s["segment_index"] for s in segs] == [0, 1, 2]
+
+    # Segment 0 untouched
+    assert segs[0]["segment_prompt"] == "prompt for segment 0"
+    assert segs[0]["characters_present"] == ["Alice (young)"]
+    assert segs[0]["image_path"] == "images/0000.png"
+    assert segs[0]["effect"] == "pan_left"
+
+    # Segment 2 (was originally segment 3) untouched
+    assert segs[2]["segment_prompt"] == "prompt for segment 3"
+    assert segs[2]["characters_present"] == ["Alice (young)"]
+    assert segs[2]["image_path"] == "images/0003.png"
+    assert segs[2]["effect"] == "pan_right"
+
+    # Merged result (index 1)
+    assert segs[1]["segment_prompt"] == ""
+    assert segs[1]["characters_present"] == []
+    assert "image_path" not in segs[1]
+    assert segs[1]["effect"] == "zoom_in"
+    assert segs[1]["script_line"] == "Second line Third line"
+    assert segs[1]["start_time"] == 1.0
+    assert segs[1]["end_time"] == 3.0
+    assert segs[1]["duration"] == 2.0

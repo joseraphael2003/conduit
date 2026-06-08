@@ -36,8 +36,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Step 2 / Step 3 UI polish** (`frontend/src/pages/Step2Characters.tsx`, `frontend/src/pages/Step3Segments.tsx`) — Step 2: description textarea is now vertically resizable (`resize-y`, 4 rows), single-default-version groups render a compact row instead of a full card, `appears_from` placeholder changed to a narrative hint, AI model label corrected to `Fireworks · Kimi K2.6`. Step 3: action buttons right-aligned (`justify-end`) with secondary-on-left / primary-on-right ordering, empty state shows an inline primary CTA.
 
+### Maintenance
+- **Synced `requirements.txt` to the installed/tested versions** — pins had drifted behind the environment. Bumped `fastapi` 0.115.0→0.119.1, `uvicorn` 0.34.0→0.47.0, `pydantic` 2.10.0→2.13.4, `python-multipart` 0.0.20→0.0.28, `openai` 1.60.0→2.38.0, `httpx` 0.28.0→0.28.1, `pytest` 8.3.0→9.0.3, `pytest-asyncio` 0.24.0→1.3.0, `respx` 0.22.0→0.23.1, `python-dotenv` 1.0.0→1.2.2 (pydub/srt/aiosqlite unchanged). Tech Stack appendix updated to match. The `APIError(message, request, *, body)` signature used by the breakdown JSON-guard is stable across openai 1.x/2.x.
+
 ### Testing
 - 181 backend tests passed (0 failures); `tsc --noEmit` → 0 errors.
+
+## [0.8.2] — 2026-06-08 — Split/Merge Prompt Preservation
+
+### Fixed
+- **`split_segment` and `merge_segment` no longer silently wipe `segment_prompt`, `characters_present`, and `image_path` from untouched segments** (`backend/routers/segments.py`) — Both endpoints now operate on raw dicts (mirroring the 0.8.1 `update_segments`/`get_segments` fix). Untouched segments retain all optional fields. Changed segments (split halves / merged result) are reset with `segment_prompt=""`, `characters_present=[]`, and `image_path` removed for regeneration.
+
+### Known Limitation
+- Images are stored as `images/{segment_index:04d}.png` and split/merge renumber indices, so existing image files can misalign with segments after re-segmentation — deferred to future work.
+
+### Testing
+- 183 backend tests passed (0 failures); `tsc --noEmit` → 0 errors.
 
 ## [0.7.3] — 2026-06-08 — Test Isolation + Delete Atomicity
 
@@ -854,14 +868,15 @@ frontend/components.json
 | **v0.7.3** | 154 | 73* | 227 |
 | **v0.8.0** | 172 | 73* | 245 |
 | **v0.8.1** | 181 | 73* | 254 |
+| **v0.8.2** | 183 | 73* | 256 |
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.8.1 — 181 tests)
+### Backend Test Breakdown (v0.8.2 — 183 tests)
 - `test_fireworks.py` — 10 tests (client, base_url, retry logic, json_schema, error handling, invalid-JSON guard)
 - `test_characters.py` — 22 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2)
 - `test_character_timeline.py` — 6 tests (happy path, 409 no-characters, 502 duplicate name, 502 missing person, 502 inconsistent anchor, single version default)
-- `test_segments.py` — 32 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502)
+- `test_segments.py` — 34 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502, split preserves other segment fields, merge preserves other segment fields)
 - `test_images.py` — 13 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status)
 - `test_projects.py` — 17 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript, voiceover re-upload, invalidate_downstream, delete atomicity)
 - `test_video.py` — 47 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters)
@@ -932,14 +947,14 @@ frontend/components.json
 
 ### Backend
 - Python 3.12.10
-- FastAPI 0.115.0
-- Uvicorn 0.34.0
-- Pydantic 2.10.0
+- FastAPI 0.119.1
+- Uvicorn 0.47.0
+- Pydantic 2.13.4
 - aiosqlite 0.21.0 (WAL mode)
-- OpenAI SDK 1.60.0 (with `base_url` override for Fireworks)
+- OpenAI SDK 2.38.0 (with `base_url` override for Fireworks)
 - pydub 0.25.1
 - srt 3.5.3
-- pytest 8.3.0 + pytest-asyncio 0.24.0 + respx 0.22.0
+- pytest 9.0.3 + pytest-asyncio 1.3.0 + respx 0.23.1
 - Pillow (for image processing)
 
 ### Frontend
