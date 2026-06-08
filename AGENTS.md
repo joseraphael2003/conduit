@@ -115,7 +115,7 @@ Read `DESIGN_SPEC.md` for full detail. Key rules agents must not break:
 
 1. **Cascade Rule:** Editing any step invalidates all downstream steps. Step 2 edits → Steps 3–5 reset. Always enforce this in both the UI and the backend state model.
 2. **Step 1 Next button:** Enabled when transcript is present. If original script is present and fidelity < 95%, show a non-blocking warning modal (not a hard block).
-3. **Step 2 is mandatory.** No skip option. Two distinct LLM calls: Call 1 = character extraction, Call 2 = prompt generation. Call 2 is only enabled after Call 1 completes and user has reviewed.
+3. **Step 2 is mandatory.** No skip option. Three distinct LLM calls: Call 1 = character extraction (persons), Timeline pass = detect versions per person (`POST /characters/timeline`), Call 2 = prompt generation per version with anchor injection. Call 2 is only enabled after the timeline pass completes and user has reviewed.
 4. **Step 3 segments:** Two-pass AI approach — Pass 1 breaks the script into segments with timestamps, Pass 2 generates image prompts. Single API call preferred; overlapping-batch fallback if token limit hit.
 5. **Step 4 images:** One upload per segment, no bulk upload. Validate 16:9 aspect ratio and minimum 1920×1080. Auto-convert RGBA → RGB. Warn (don't block) on sub-minimum resolution.
 6. **Step 5 video:** Each segment gets a randomly auto-assigned motion effect (pan left/right/up/down, zoom in/out). User can override individual segments. Hard cuts only — no crossfade.
@@ -155,6 +155,60 @@ projects/{uuid}/
     ├── source_of_truth_script.txt
     ├── words.json
     └── segments.json
+```
+
+### Versioned `characters.json` Schema
+
+After Call 1 (extraction) and the timeline pass, `characters.json` stores **one entry per character version**, grouped by `base_name`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | Unique display name for this version (e.g., `"Alice (young)"`, `"Alice (old)"`) |
+| `base_name` | `str` | Shared root name across versions (e.g., `"Alice"`) |
+| `version_label` | `str` | Human-readable label (e.g., `"young"`, `"old"`, `"default"`) |
+| `version_index` | `int` | Zero-based ordering of this version within the base group |
+| `appears_from` | `str` | Script text or chapter marker indicating where this version first appears |
+| `identity_anchor` | `str` | Shared facial-identity descriptors duplicated across all versions of the same `base_name` (e.g., "oval face, green almond eyes, fair skin, slender build") |
+| `type` | `str` | `"speaking"` \| `"creature"` \| `"npc_entity"` |
+| `importance` | `str` | `"major"` \| `"minor"` |
+| `description` | `str` | Visual description specific to this version (clothing, age, role, etc.) |
+| `front_profile_prompt` | `str` | (after Call 2) Single-image prompt with anchor injection |
+| `turnaround_prompt` | `str` | (after Call 2) Reference-sheet prompt with anchor injection |
+
+**Version grouping rule:** Every entry with the same `base_name` forms a version group. The `identity_anchor` must be **identical** across all entries in a group; it is the stable facial/anatomical signature that keeps generated images consistent even when age, clothing, or role changes.
+
+**Example (after timeline pass + Call 2):**
+```json
+{
+  "characters": [
+    {
+      "name": "Alice (young)",
+      "base_name": "Alice",
+      "version_label": "young",
+      "version_index": 0,
+      "appears_from": "Chapter 1 — Alice arrives in the village",
+      "identity_anchor": "oval face, green almond eyes, fair skin, slender build, long auburn hair",
+      "type": "speaking",
+      "importance": "major",
+      "description": "Young woman, 20s, wearing a red wool coat over a dark turtleneck, leather boots",
+      "front_profile_prompt": "...",
+      "turnaround_prompt": "..."
+    },
+    {
+      "name": "Alice (old)",
+      "base_name": "Alice",
+      "version_label": "old",
+      "version_index": 1,
+      "appears_from": "Chapter 5 — Twenty years later",
+      "identity_anchor": "oval face, green almond eyes, fair skin, slender build, long auburn hair streaked with gray",
+      "type": "speaking",
+      "importance": "major",
+      "description": "Elderly woman, 60s, weathered face, walking with a cane, wearing a simple gray shawl",
+      "front_profile_prompt": "...",
+      "turnaround_prompt": "..."
+    }
+  ]
+}
 ```
 
 ---

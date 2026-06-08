@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { SkeletonTable } from "@/components/SkeletonTable";
@@ -11,8 +11,21 @@ import {
   Warning,
   ArrowClockwise,
   Check,
+  Sparkle,
 } from "@phosphor-icons/react";
 import { apiBase } from "@/config";
+
+interface Character {
+  name: string;
+  base_name: string;
+  version_label: string;
+  version_index: number;
+  appears_from: string;
+  identity_anchor: string;
+  description: string;
+  type: "speaking" | "creature" | "npc_entity";
+  importance: "major" | "minor";
+}
 
 interface Segment {
   segment_index: number;
@@ -22,6 +35,8 @@ interface Segment {
   duration: number;
   prompt: string;
   characters: string[];
+  segment_prompt?: string;
+  characters_present?: string[];
 }
 
 export function Step3Segments() {
@@ -34,6 +49,8 @@ export function Step3Segments() {
   const [splitPoints, setSplitPoints] = useState<Record<number, number>>({});
   const [savingPrompt, setSavingPrompt] = useState<Record<number, boolean>>({});
   const [promptErrors, setPromptErrors] = useState<Record<number, string | null>>({});
+  const [allCharacters, setAllCharacters] = useState<Character[]>([]);
+  const [regenerating, setRegenerating] = useState<Record<number, boolean>>({});
 
   const loadSegments = useCallback(async () => {
     if (!uuid) return;
@@ -62,6 +79,35 @@ export function Step3Segments() {
       setError(err instanceof Error ? err.message : "Unknown error");
     });
   }, [loadSegments]);
+
+  useEffect(() => {
+    if (!uuid) return;
+    const fetchCharacters = async () => {
+      try {
+        const response = await fetch(
+          `${apiBase}/projects/${uuid}/characters`
+        );
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data.characters) {
+          setAllCharacters(data.characters);
+        }
+      } catch {
+        // Silent fail
+      }
+    };
+    fetchCharacters();
+  }, [uuid]);
+
+  const versionsByBaseName = useMemo(() => {
+    const map: Record<string, Character[]> = {};
+    for (const char of allCharacters) {
+      const base = char.base_name || char.name;
+      if (!map[base]) map[base] = [];
+      map[base].push(char);
+    }
+    return map;
+  }, [allCharacters]);
 
   const handleBreakdown = async () => {
     if (!uuid) return;
@@ -136,10 +182,10 @@ export function Step3Segments() {
         throw new Error(`Fetch failed: ${getResponse.status}`);
       }
       const fullData = await getResponse.json();
-      const fullSegments = fullData.segments || [];
+      const fullSegments: Segment[] = fullData.segments || [];
 
       // Apply local edit to the matching segment
-      const updatedSegments = fullSegments.map((seg: any) =>
+      const updatedSegments = fullSegments.map((seg) =>
         seg.segment_index === segment.segment_index
           ? { ...seg, prompt: segment.prompt }
           : seg
@@ -167,6 +213,69 @@ export function Step3Segments() {
     }
   };
 
+  const handleVersionChange = (segmentIndex: number, baseName: string, newVersionName: string) => {
+    setSegments((prev) =>
+      prev.map((seg, i) => {
+        if (i !== segmentIndex || !seg.characters_present) return seg;
+        const newChars = seg.characters_present.map((name) => {
+          const char = allCharacters.find((c) => c.name === name);
+          if (char && (char.base_name || char.name) === baseName) {
+            return newVersionName;
+          }
+          return name;
+        });
+        return { ...seg, characters_present: newChars };
+      })
+    );
+  };
+
+  const handleRegenerate = async (index: number) => {
+    if (!uuid) return;
+    const segment = segments[index];
+    if (!segment) return;
+
+    setRegenerating((prev) => ({ ...prev, [index]: true }));
+    setError(null);
+
+    try {
+      const character_versions: Record<string, string> = {};
+      for (const name of segment.characters_present || []) {
+        const char = allCharacters.find((c) => c.name === name);
+        if (char) {
+          character_versions[char.base_name || char.name] = name;
+        }
+      }
+
+      const response = await fetch(
+        `${apiBase}/projects/${uuid}/segments/${index}/prompt`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ character_versions }),
+        }
+      );
+      if (!response.ok) {
+        throw new Error(`Regenerate failed: ${response.status}`);
+      }
+      const data = await response.json();
+      setSegments((prev) =>
+        prev.map((seg, i) =>
+          i === index
+            ? {
+                ...seg,
+                segment_prompt: data.segment_prompt,
+                characters_present: data.characters_present,
+              }
+            : seg
+        )
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error during regenerate");
+    } finally {
+      setRegenerating((prev) => ({ ...prev, [index]: false }));
+    }
+  };
+
   const handleSplitPointChange = (segmentIndex: number, value: string) => {
     const num = parseFloat(value);
     if (!isNaN(num)) {
@@ -190,7 +299,7 @@ export function Step3Segments() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ split_point: splitPoint }),
+          body: JSON.stringify({ timestamp: splitPoint }),
         }
       );
       if (!response.ok) {
@@ -379,16 +488,40 @@ export function Step3Segments() {
                     </div>
                   </td>
                   <td className="px-3 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {segment.characters && segment.characters.length > 0 ? (
-                        segment.characters.map((char) => (
-                          <span
-                            key={char}
-                            className="font-mono text-xs text-[#06B6D4] bg-[#06B6D4]/10 px-1.5 py-0.5"
-                          >
-                            @{char}
-                          </span>
-                        ))
+                    <div className="flex flex-col gap-2">
+                      {segment.characters_present && segment.characters_present.length > 0 ? (
+                        segment.characters_present.map((charName) => {
+                          const char = allCharacters.find((c) => c.name === charName);
+                          const baseName = char?.base_name || charName;
+                          const versions = versionsByBaseName[baseName] || [];
+                          if (versions.length > 1) {
+                            return (
+                              <div key={charName} className="flex items-center gap-2">
+                                <select
+                                  value={charName}
+                                  onChange={(e) =>
+                                    handleVersionChange(index, baseName, e.target.value)
+                                  }
+                                  className="bg-[#0A0A0F] border border-[#2A2A35] p-1 font-mono text-xs text-[#E8E8F0] focus:border-[#F0A040] focus:outline-none"
+                                >
+                                  {versions.map((v) => (
+                                    <option key={v.name} value={v.name}>
+                                      {v.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            );
+                          }
+                          return (
+                            <span
+                              key={charName}
+                              className="font-mono text-xs text-[#06B6D4] bg-[#06B6D4]/10 px-1.5 py-0.5 w-fit"
+                            >
+                              @{charName}
+                            </span>
+                          );
+                        })
                       ) : (
                         <span className="font-mono text-xs text-[#5A5A6A]">—</span>
                       )}
@@ -396,6 +529,23 @@ export function Step3Segments() {
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex flex-col gap-2">
+                      <button
+                        onClick={() => handleRegenerate(index)}
+                        disabled={loading || regenerating[index]}
+                        className={cn(
+                          "flex items-center gap-1 px-2 py-1 font-body text-xs font-semibold tracking-wide uppercase",
+                          "bg-[#1E1E28] text-[#E8E8F0] border border-[#2A2A35] hover:bg-[#2A2A35]",
+                          "disabled:opacity-50 disabled:cursor-not-allowed"
+                        )}
+                        title="Regenerate prompt with selected character versions"
+                      >
+                        {regenerating[index] ? (
+                          <AmberBar />
+                        ) : (
+                          <Sparkle size={14} weight="regular" />
+                        )}
+                        Regenerate
+                      </button>
                       <div className="flex items-center gap-1">
                         <input
                           type="number"

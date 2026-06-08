@@ -4,9 +4,6 @@ import pytest
 import httpx
 import respx
 
-import routers.segments as segments_module
-
-
 @pytest.mark.asyncio
 async def test_breakdown_segments(async_client, cleanup_projects, temp_projects_dir):
     """POST /api/v1/projects/{uuid}/segments/breakdown returns 200 with segments."""
@@ -736,3 +733,748 @@ async def test_generate_prompts_batch_fallback(async_client, cleanup_projects, t
     assert len(saved["segments"]) == 26
     assert saved["segments"][20]["segment_prompt"] == "Batch1 prompt for line 20."
     assert saved["segments"][25]["segment_prompt"] == "Batch1 prompt for line 25."
+
+
+@pytest.mark.asyncio
+async def test_flashback_non_monotonic(async_client, cleanup_projects, temp_projects_dir):
+    """Pass 2 resolves flashback (non-monotonic) to earlier version."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Flashback Test"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    project_dir = os.path.join(temp_projects_dir, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+
+    # Write script
+    script_path = os.path.join(conduit_dir, "source_of_truth_script.txt")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write("Alice as a child. Alice as an adult. Alice as a child again.")
+
+    # Write characters.json with 2 versions
+    characters = {
+        "characters": [
+            {
+                "name": "Alice (Young)",
+                "type": "speaking",
+                "importance": "major",
+                "description": "A young girl.",
+                "base_name": "Alice",
+                "version_label": "Young",
+                "version_index": 0,
+                "identity_anchor": "Blue-eyed with brown hair",
+            },
+            {
+                "name": "Alice (Adult)",
+                "type": "speaking",
+                "importance": "major",
+                "description": "A grown woman.",
+                "base_name": "Alice",
+                "version_label": "Adult",
+                "version_index": 1,
+                "identity_anchor": "Blue-eyed with brown hair",
+            },
+        ]
+    }
+    characters_path = os.path.join(project_dir, "characters.json")
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump(characters, f)
+
+    # Write 5 segments (simulating Pass 1 complete)
+    segments = {
+        "segments": [
+            {"segment_index": 0, "script_line": "Alice as a child.", "start_time": 0.0, "end_time": 1.0, "duration": 1.0},
+            {"segment_index": 1, "script_line": "Some transition.", "start_time": 1.0, "end_time": 2.0, "duration": 1.0},
+            {"segment_index": 2, "script_line": "Alice as an adult.", "start_time": 2.0, "end_time": 3.0, "duration": 1.0},
+            {"segment_index": 3, "script_line": "Another transition.", "start_time": 3.0, "end_time": 4.0, "duration": 1.0},
+            {"segment_index": 4, "script_line": "Alice as a child again.", "start_time": 4.0, "end_time": 5.0, "duration": 1.0},
+        ]
+    }
+    segments_path = os.path.join(conduit_dir, "segments.json")
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    # Mock Pass 2 to return versioned names
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "segments": [
+                                        {
+                                            "segment_index": 0,
+                                            "script_line": "Alice as a child.",
+                                            "segment_prompt": "Young Alice in a garden.",
+                                            "characters_present": ["Alice (Young)"],
+                                            "start_time": 0.0,
+                                            "end_time": 1.0,
+                                            "duration": 1.0,
+                                        },
+                                        {
+                                            "segment_index": 1,
+                                            "script_line": "Some transition.",
+                                            "segment_prompt": "A transition scene.",
+                                            "characters_present": [],
+                                            "start_time": 1.0,
+                                            "end_time": 2.0,
+                                            "duration": 1.0,
+                                        },
+                                        {
+                                            "segment_index": 2,
+                                            "script_line": "Alice as an adult.",
+                                            "segment_prompt": "Adult Alice at a desk.",
+                                            "characters_present": ["Alice (Adult)"],
+                                            "start_time": 2.0,
+                                            "end_time": 3.0,
+                                            "duration": 1.0,
+                                        },
+                                        {
+                                            "segment_index": 3,
+                                            "script_line": "Another transition.",
+                                            "segment_prompt": "Another transition scene.",
+                                            "characters_present": [],
+                                            "start_time": 3.0,
+                                            "end_time": 4.0,
+                                            "duration": 1.0,
+                                        },
+                                        {
+                                            "segment_index": 4,
+                                            "script_line": "Alice as a child again.",
+                                            "segment_prompt": "Young Alice in a garden again.",
+                                            "characters_present": ["Alice (Young)"],
+                                            "start_time": 4.0,
+                                            "end_time": 5.0,
+                                            "duration": 1.0,
+                                        },
+                                    ]
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/prompts")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["segments"]) == 5
+
+        # Build name -> version_index map from characters.json
+        with open(characters_path, "r", encoding="utf-8") as f:
+            chars = json.load(f)
+        name_to_index = {c["name"]: c["version_index"] for c in chars["characters"]}
+
+        seg0 = data["segments"][0]
+        seg2 = data["segments"][2]
+        seg4 = data["segments"][4]
+
+        assert seg0["characters_present"] == ["Alice (Young)"]
+        assert seg2["characters_present"] == ["Alice (Adult)"]
+        assert seg4["characters_present"] == ["Alice (Young)"]
+
+        # Assert version_index resolution
+        assert name_to_index[seg0["characters_present"][0]] == 0
+        assert name_to_index[seg2["characters_present"][0]] == 1
+        assert name_to_index[seg4["characters_present"][0]] == 0
+
+    # Verify persistence
+    with open(segments_path, "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert saved["segments"][4]["characters_present"] == ["Alice (Young)"]
+    assert saved["segments"][2]["characters_present"] == ["Alice (Adult)"]
+
+
+@pytest.mark.asyncio
+async def test_end_to_end_override(async_client, cleanup_projects, temp_projects_dir):
+    """Full flow: extract, timeline, prompts, then override segment 2 with pinned version."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Override E2E"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+
+    project_dir = os.path.join(temp_projects_dir, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    script_path = os.path.join(conduit_dir, "source_of_truth_script.txt")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write("Alice as a child. Alice as an adult. Alice as a child again.")
+
+    # Mock extract characters (Call 1)
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "characters": [
+                                        {
+                                            "name": "Alice",
+                                            "type": "speaking",
+                                            "importance": "major",
+                                            "description": "A girl who ages.",
+                                            "base_name": "Alice",
+                                            "version_label": "default",
+                                            "version_index": 0,
+                                            "identity_anchor": "Blue-eyed with brown hair",
+                                        }
+                                    ]
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+        extract_resp = await async_client.post(f"/api/v1/projects/{project_uuid}/characters/extract")
+        assert extract_resp.status_code == 200
+
+    # Mock timeline (detect versions)
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "characters": [
+                                        {
+                                            "name": "Alice (Young)",
+                                            "type": "speaking",
+                                            "importance": "major",
+                                            "description": "A young girl.",
+                                            "base_name": "Alice",
+                                            "version_label": "Young",
+                                            "version_index": 0,
+                                            "identity_anchor": "Blue-eyed with brown hair",
+                                            "appears_from": "00:00",
+                                        },
+                                        {
+                                            "name": "Alice (Adult)",
+                                            "type": "speaking",
+                                            "importance": "major",
+                                            "description": "A grown woman.",
+                                            "base_name": "Alice",
+                                            "version_label": "Adult",
+                                            "version_index": 1,
+                                            "identity_anchor": "Blue-eyed with brown hair",
+                                            "appears_from": "05:00",
+                                        },
+                                    ]
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+        timeline_resp = await async_client.post(f"/api/v1/projects/{project_uuid}/characters/timeline")
+        assert timeline_resp.status_code == 200
+
+    # Advance to step 2
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    # Write segments
+    segments = {
+        "segments": [
+            {"segment_index": 0, "script_line": "Alice as a child.", "start_time": 0.0, "end_time": 1.0, "duration": 1.0},
+            {"segment_index": 1, "script_line": "Some transition.", "start_time": 1.0, "end_time": 2.0, "duration": 1.0},
+            {"segment_index": 2, "script_line": "Alice as an adult.", "start_time": 2.0, "end_time": 3.0, "duration": 1.0},
+            {"segment_index": 3, "script_line": "Another transition.", "start_time": 3.0, "end_time": 4.0, "duration": 1.0},
+            {"segment_index": 4, "script_line": "Alice as a child again.", "start_time": 4.0, "end_time": 5.0, "duration": 1.0},
+        ]
+    }
+    segments_path = os.path.join(conduit_dir, "segments.json")
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    # Mock Pass 2 prompts
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "segments": [
+                                        {
+                                            "segment_index": 0,
+                                            "script_line": "Alice as a child.",
+                                            "segment_prompt": "Young Alice in a garden.",
+                                            "characters_present": ["Alice (Young)"],
+                                            "start_time": 0.0,
+                                            "end_time": 1.0,
+                                            "duration": 1.0,
+                                        },
+                                        {
+                                            "segment_index": 1,
+                                            "script_line": "Some transition.",
+                                            "segment_prompt": "A transition scene.",
+                                            "characters_present": [],
+                                            "start_time": 1.0,
+                                            "end_time": 2.0,
+                                            "duration": 1.0,
+                                        },
+                                        {
+                                            "segment_index": 2,
+                                            "script_line": "Alice as an adult.",
+                                            "segment_prompt": "Adult Alice at a desk.",
+                                            "characters_present": ["Alice (Adult)"],
+                                            "start_time": 2.0,
+                                            "end_time": 3.0,
+                                            "duration": 1.0,
+                                        },
+                                        {
+                                            "segment_index": 3,
+                                            "script_line": "Another transition.",
+                                            "segment_prompt": "Another transition scene.",
+                                            "characters_present": [],
+                                            "start_time": 3.0,
+                                            "end_time": 4.0,
+                                            "duration": 1.0,
+                                        },
+                                        {
+                                            "segment_index": 4,
+                                            "script_line": "Alice as a child again.",
+                                            "segment_prompt": "Young Alice in a garden again.",
+                                            "characters_present": ["Alice (Young)"],
+                                            "start_time": 4.0,
+                                            "end_time": 5.0,
+                                            "duration": 1.0,
+                                        },
+                                    ]
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/prompts")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["segments"][2]["characters_present"] == ["Alice (Adult)"]
+        assert "Adult" in data["segments"][2]["segment_prompt"]
+
+    # Override segment 2 via regen endpoint with pinned young version
+    with respx.mock:
+        route = respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "segments": [
+                                        {
+                                            "segment_index": 2,
+                                            "script_line": "Alice as an adult.",
+                                            "segment_prompt": "Young Alice at a desk in a flashback.",
+                                            "characters_present": ["Alice (Young)"],
+                                            "start_time": 2.0,
+                                            "end_time": 3.0,
+                                            "duration": 1.0,
+                                        },
+                                    ]
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+        override_resp = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/segments/2/prompt",
+            json={"character_versions": {"Alice": "Alice (Young)"}},
+        )
+        assert override_resp.status_code == 200
+        override_data = override_resp.json()
+        assert override_data["characters_present"] == ["Alice (Young)"]
+        assert "Young" in override_data["segment_prompt"]
+
+        # Assert the prompt sent to Fireworks only included the pinned version
+        request = route.calls.last.request
+        body = json.loads(request.content)
+        user_prompt = body["messages"][1]["content"]
+        assert "Alice (Young)" in user_prompt
+        # Extract the <characters> block to confirm filtering
+        chars_start = user_prompt.find("<characters>")
+        chars_end = user_prompt.find("</characters>")
+        chars_block = user_prompt[chars_start:chars_end]
+        assert "Alice (Young)" in chars_block
+        assert "Alice (Adult)" not in chars_block
+
+    # Verify persistence: reload segments.json
+    with open(segments_path, "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert saved["segments"][2]["characters_present"] == ["Alice (Young)"]
+    assert "Young" in saved["segments"][2]["segment_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_pass2_versioned_characters(async_client, cleanup_projects, temp_projects_dir):
+    """Mock Pass 2 with versioned characters. Assert versioned names in characters_present."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Versioned Pass2"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "The young hero trains.",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+            },
+            {
+                "segment_index": 1,
+                "script_line": "The old hero rests.",
+                "start_time": 1.1,
+                "end_time": 2.5,
+                "duration": 1.4,
+            },
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    characters = {
+        "characters": [
+            {"name": "Hero (young)", "base_name": "Hero", "type": "speaking", "importance": "major", "description": "A young hero"},
+            {"name": "Hero (adult)", "base_name": "Hero", "type": "speaking", "importance": "major", "description": "An adult hero"},
+        ]
+    }
+    with open(os.path.join(temp_projects_dir, project_uuid, "characters.json"), "w", encoding="utf-8") as f:
+        json.dump(characters, f)
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "segments": [
+                                        {
+                                            "segment_index": 0,
+                                            "script_line": "The young hero trains.",
+                                            "segment_prompt": "A young hero training in a dojo.",
+                                            "characters_present": ["Hero (young)"],
+                                            "start_time": 0.0,
+                                            "end_time": 1.0,
+                                            "duration": 1.0,
+                                        },
+                                        {
+                                            "segment_index": 1,
+                                            "script_line": "The old hero rests.",
+                                            "segment_prompt": "An old hero resting by the fire.",
+                                            "characters_present": ["Hero (adult)"],
+                                            "start_time": 1.1,
+                                            "end_time": 2.5,
+                                            "duration": 1.4,
+                                        },
+                                    ]
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/prompts")
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        data = resp.json()
+        assert len(data["segments"]) == 2
+        assert data["segments"][0]["characters_present"] == ["Hero (young)"]
+        assert data["segments"][1]["characters_present"] == ["Hero (adult)"]
+
+    # Verify segments.json saved versioned names
+    with open(os.path.join(conduit_dir, "segments.json"), "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert saved["segments"][0]["characters_present"] == ["Hero (young)"]
+    assert saved["segments"][1]["characters_present"] == ["Hero (adult)"]
+
+
+@pytest.mark.asyncio
+async def test_regenerate_single_segment(async_client, cleanup_projects, temp_projects_dir):
+    """Mock regen endpoint for segment 2. Assert only segment 2 changes, others preserved."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Regen Single"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Line one",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+                "segment_prompt": "Prompt one",
+                "characters_present": ["Alice"],
+                "effect": "pan_left",
+                "image_path": "/tmp/projects/test/images/0000.png",
+            },
+            {
+                "segment_index": 1,
+                "script_line": "Line two",
+                "start_time": 1.0,
+                "end_time": 2.0,
+                "duration": 1.0,
+                "segment_prompt": "Prompt two",
+                "characters_present": ["Alice"],
+                "effect": "zoom_in",
+                "image_path": "/tmp/projects/test/images/0001.png",
+            },
+            {
+                "segment_index": 2,
+                "script_line": "Line three",
+                "start_time": 2.0,
+                "end_time": 3.0,
+                "duration": 1.0,
+                "segment_prompt": "Original prompt three",
+                "characters_present": ["Bob"],
+                "effect": "pan_right",
+                "image_path": "/tmp/projects/test/images/0002.png",
+            },
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "segments": [
+                                        {
+                                            "segment_index": 2,
+                                            "script_line": "Line three",
+                                            "segment_prompt": "Regenerated prompt three",
+                                            "characters_present": ["Bob"],
+                                            "start_time": 2.0,
+                                            "end_time": 3.0,
+                                            "duration": 1.0,
+                                        },
+                                    ]
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/2/prompt")
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        data = resp.json()
+        assert data["segment_prompt"] == "Regenerated prompt three"
+        assert data["characters_present"] == ["Bob"]
+        assert data["effect"] == "pan_right"
+        assert data["image_path"] == "/tmp/projects/test/images/0002.png"
+
+    # Verify segments.json: only segment 2 changed, others preserved
+    with open(os.path.join(conduit_dir, "segments.json"), "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert saved["segments"][0]["segment_prompt"] == "Prompt one"
+    assert saved["segments"][1]["segment_prompt"] == "Prompt two"
+    assert saved["segments"][2]["segment_prompt"] == "Regenerated prompt three"
+    assert saved["segments"][2]["effect"] == "pan_right"
+    assert saved["segments"][2]["image_path"] == "/tmp/projects/test/images/0002.png"
+
+
+@pytest.mark.asyncio
+async def test_regenerate_with_character_versions(async_client, cleanup_projects, temp_projects_dir):
+    """Mock regen with character_versions mapping. Assert filtered version in characters_present."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Regen Versions"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "The hero returns.",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+                "segment_prompt": "Original prompt",
+                "characters_present": ["Hero (young)"],
+                "effect": "none",
+            },
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    characters = {
+        "characters": [
+            {"name": "Hero (young)", "base_name": "Hero", "type": "speaking", "importance": "major", "description": "A young hero"},
+            {"name": "Hero (adult)", "base_name": "Hero", "type": "speaking", "importance": "major", "description": "An adult hero"},
+        ]
+    }
+    with open(os.path.join(temp_projects_dir, project_uuid, "characters.json"), "w", encoding="utf-8") as f:
+        json.dump(characters, f)
+
+    with respx.mock:
+        route = respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "segments": [
+                                        {
+                                            "segment_index": 0,
+                                            "script_line": "The hero returns.",
+                                            "segment_prompt": "Adult hero prompt.",
+                                            "characters_present": ["Hero (adult)"],
+                                            "start_time": 0.0,
+                                            "end_time": 1.0,
+                                            "duration": 1.0,
+                                        },
+                                    ]
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+
+        resp = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/segments/0/prompt",
+            json={"character_versions": {"Hero": "Hero (adult)"}},
+        )
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        data = resp.json()
+        assert data["characters_present"] == ["Hero (adult)"]
+        assert data["segment_prompt"] == "Adult hero prompt."
+
+        # Verify the prompt sent to Fireworks only included the selected version
+        request = route.calls.last.request
+        body = json.loads(request.content)
+        prompt = body["messages"][1]["content"]
+        assert "Hero (adult)" in prompt
+        # Extract the <characters> block to confirm filtering
+        chars_start = prompt.find("<characters>")
+        chars_end = prompt.find("</characters>")
+        chars_block = prompt[chars_start:chars_end]
+        assert "Hero (adult)" in chars_block
+        assert "Hero (young)" not in chars_block
+
+
+@pytest.mark.asyncio
+async def test_regenerate_bad_index(async_client, cleanup_projects, temp_projects_dir):
+    """POST to out-of-range segment_index returns 400."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Bad Index"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Only line",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+                "segment_prompt": "Prompt",
+                "characters_present": [],
+            },
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/5/prompt")
+    assert resp.status_code == 400
+    assert "Invalid segment_index" in resp.json()["detail"]

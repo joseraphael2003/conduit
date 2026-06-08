@@ -10,6 +10,9 @@ class SegmentBreakdown(BaseModel):
     end_time: float
     duration: float
     effect: str = "none"
+    image_path: Optional[str] = None
+    segment_prompt: Optional[str] = None
+    characters_present: Optional[List[str]] = None
 
 
 class Segments(BaseModel):
@@ -25,6 +28,7 @@ class SegmentPrompt(BaseModel):
     end_time: float
     duration: float
     effect: str = "none"
+    image_path: Optional[str] = None
 
 
 class SegmentPrompts(BaseModel):

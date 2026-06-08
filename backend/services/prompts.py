@@ -106,6 +106,44 @@ def build_character_extraction_messages(script: str) -> list[dict]:
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
+def build_character_timeline_messages(
+    script: str, characters: object, style: StyleProfile | None = None
+) -> list[dict]:
+    """§4.1b — Character timeline / version extraction (style-invariant).
+
+    Identifies distinct visual versions of each character across narrative time.
+    """
+    system = (
+        "You are a character timeline engine. Read the full script and, for each provided person, identify distinct visual "
+        "versions across narrative time. A version is a significant transformation in age, body, or role, not a costume change.\n\n"
+        "For each person, output one version entry per distinct life-stage.\n\n"
+        "Output fields per version:\n"
+        "- name: unique version name (e.g., \"Hero (young)\", \"Hero (old)\")\n"
+        "- base_name: the canonical character name shared across all versions\n"
+        "- version_label: short label for this life-stage (e.g., \"young\", \"old\", \"default\")\n"
+        "- version_index: integer index for this version (0, 1, 2...)\n"
+        "- appears_from: the grounded narrative boundary where this version first appears. Use explicit script evidence. "
+        "Do NOT invent facts. If only one version exists, use empty string.\n"
+        '- type: "speaking" | "creature" | "npc_entity"\n'
+        '- importance: "major" if the entity appears in multiple scenes or is central to the plot. '
+        '"minor" if they appear once or are background.\n'
+        "- description: detailed visual description of this version's appearance, clothing, and expression at this life-stage.\n"
+        "- identity_anchor: stable facial / anatomical traits that MUST stay consistent across all versions of this base_name. "
+        "Duplicate the same identity_anchor onto every version of the same base_name.\n\n"
+        "Rules:\n"
+        "- Single-appearance characters get exactly one version: version_label=\"default\", version_index=0, appears_from=\"\".\n"
+        "- Do NOT create versions for costume changes or minor outfit variations.\n"
+        "- Ground every version boundary in explicit script evidence.\n"
+        "- Do NOT leave fields blank.\n\n"
+        "Output shape: CharacterList (a JSON object with a \"characters\" array)."
+    )
+    user = (
+        f"<script>\n{script}\n</script>\n\n"
+        f"<characters>\n{_to_json_str(characters)}\n</characters>"
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
 def build_front_profile_messages(characters: object, style: StyleProfile) -> list[dict]:
     """§4.2 Prompt A — Front profile prompt generation."""
     system = (
@@ -133,7 +171,13 @@ def build_front_profile_messages(characters: object, style: StyleProfile) -> lis
         "Important rules:\n"
         "- For minor characters with minimal description, keep the prompt shorter but still fully specified.\n"
         "- For major characters, provide more detailed prompts.\n"
-        "- Do NOT leave fields blank."
+        "- Do NOT leave fields blank.\n\n"
+        "Version consistency rules:\n"
+        "- Each character entry may include an identity_anchor, version_label, and appears_from.\n"
+        "- If identity_anchor is present, it describes stable facial / anatomical traits that MUST stay consistent "
+        "across every version of this character. Preserve these traits in the generated prompt.\n"
+        "- If version_label and appears_from are present, the prompt must reflect this specific life-stage only.\n"
+        "- Do NOT mix traits from different versions into the same prompt."
     )
     user = f"<characters>\n{_to_json_str(characters)}\n</characters>"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -171,7 +215,13 @@ def build_turnaround_messages(characters: object, style: StyleProfile) -> list[d
         "Important rules:\n"
         "- For minor characters with minimal description, keep the prompt shorter but still fully specified.\n"
         "- For major characters, provide more detailed prompts.\n"
-        "- Do NOT leave fields blank."
+        "- Do NOT leave fields blank.\n\n"
+        "Version consistency rules:\n"
+        "- Each character entry may include an identity_anchor, version_label, and appears_from.\n"
+        "- If identity_anchor is present, it describes stable facial / anatomical traits that MUST stay consistent "
+        "across every version of this character. Preserve these traits in the generated prompt.\n"
+        "- If version_label and appears_from are present, the prompt must reflect this specific life-stage only.\n"
+        "- Do NOT mix traits from different versions into the same prompt."
     )
     user = f"<characters>\n{_to_json_str(characters)}\n</characters>"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -252,9 +302,14 @@ def build_segment_prompts_messages(
         "8. **Character references:**\n"
         "   - If a character is visually present in the segment, include their name in characters_present as @Name.\n"
         '   - If a character is mentioned but not shown (e.g., "Alice thought about Bob"), do NOT include @Bob unless Bob is visible in the scene.\n\n'
-        "9. **Consistency:**\n"
-        "   - Maintain visual consistency across segments. If Segment 1 is \"dark forest at twilight,\" Segment 2 in the same forest "
-        "should not suddenly be \"bright sunny meadow\" unless the script explicitly describes a time/location change.\n\n"
+        "9. **Version resolution:**\n"
+        "   - Characters may have multiple visual versions across narrative time (e.g., age stages, transformations).\n"
+        "   - For each character present in a segment, pick the version whose appears_from boundary the segment's script_line falls into.\n"
+        "   - Judge based on this segment's own content. Do NOT assume versions change in segment order — flashbacks may revisit earlier versions.\n"
+        "   - Put the resolved version's unique name in characters_present and describe that version's traits in the prompt.\n\n"
+        "10. **Consistency:**\n"
+        "   - Maintain visual consistency within a character version. When the script crosses a version boundary (e.g., a time skip or transformation), "
+        "switch deliberately to the new version's appearance; do not carry the old appearance across the boundary, and do not change appearance without a boundary.\n\n"
         "## Example Good Prompt\n\n"
         'script_line: "Alice walked through the dark forest, her heart pounding."\n'
         'segment_prompt: "Cinematic wide shot, photorealistic 3D render, Secret Level / Love Death and Robots style, highly detailed, cinematic lighting. '

@@ -17,6 +17,7 @@ STATE_ORDER = [
 
 SUB_STEP_KEYS = [
     "step_2_call_1_complete",
+    "step_2_timeline_complete",
     "step_2_call_2_complete",
     "step_3_pass_1_complete",
     "step_3_pass_2_complete",
@@ -154,6 +155,7 @@ def _clear_sub_step_state(data: dict, edited_step: int) -> dict:
         for key in SUB_STEP_KEYS:
             data.pop(key, None)
     elif edited_step == 2:
+        data.pop("step_2_call_2_complete", None)
         data.pop("step_3_pass_1_complete", None)
         data.pop("step_3_pass_2_complete", None)
         data.pop("step_4_images_uploaded", None)

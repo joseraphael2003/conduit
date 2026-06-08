@@ -7,9 +7,7 @@ from openai._exceptions import AuthenticationError, RateLimitError, APIError
 from pydantic import ValidationError
 
 from models.characters import (
-    CharacterDescription,
     CharacterList,
-    CharacterPrompts,
     CharacterPromptsList,
     FrontProfilePromptList,
     TurnaroundPromptList,
@@ -17,11 +15,18 @@ from models.characters import (
 from services.fireworks import FireworksClient
 from services.prompts import (
     build_character_extraction_messages,
+    build_character_timeline_messages,
     build_front_profile_messages,
     build_turnaround_messages,
     get_style,
 )
-from services.state import get_state, update_state, get_style_id
+from services.state import (
+    get_state,
+    update_state,
+    get_style_id,
+    invalidate_downstream,
+    set_sub_step_state,
+)
 from models.state import ProjectState
 import routers.projects as _projects_module
 
@@ -109,6 +114,14 @@ async def extract_characters(project_uuid: str):
             detail="AI returned data in an unexpected format",
         ) from exc
 
+    # Set default version fields for projects that skip the timeline pass
+    for char in validated.characters:
+        if not char.base_name:
+            char.base_name = char.name
+        if not char.version_label:
+            char.version_label = "default"
+        char.version_index = 0
+
     # Save validated extraction result to characters.json
     project_dir = os.path.join(_projects_module.PROJECTS_BASE_DIR, project_uuid)
     characters_path = os.path.join(project_dir, "characters.json")
@@ -123,6 +136,140 @@ async def extract_characters(project_uuid: str):
         state_data["step_2_call_1_complete"] = True
         with open(state_json_path, "w", encoding="utf-8") as f:
             json.dump(state_data, f, indent=2)
+
+    return validated
+
+
+@characters_router.post(
+    "/projects/{project_uuid}/characters/timeline",
+    response_model=CharacterList,
+)
+async def generate_character_timeline(project_uuid: str):
+    """Generate character timeline versions from the project's script."""
+    # Verify project exists
+    current_state = await get_state(project_uuid)
+
+    # Prerequisite: must be at least step_1_complete
+    if current_state == ProjectState.CREATED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Prerequisite step not met",
+        )
+
+    # Read existing characters
+    project_dir = os.path.join(_projects_module.PROJECTS_BASE_DIR, project_uuid)
+    characters_path = os.path.join(project_dir, "characters.json")
+    if not os.path.exists(characters_path):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Character extraction not completed",
+        )
+
+    with open(characters_path, "r", encoding="utf-8") as f:
+        existing_data = json.load(f)
+
+    characters = existing_data.get("characters", [])
+    if not characters:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Character extraction not completed",
+        )
+
+    # Read script
+    script_path = os.path.join(
+        _projects_module.PROJECTS_BASE_DIR, project_uuid, ".conduit", "source_of_truth_script.txt"
+    )
+    if not os.path.exists(script_path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No script found",
+        )
+
+    with open(script_path, "r", encoding="utf-8") as f:
+        script_content = f.read()
+
+    if not script_content.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No script found",
+        )
+
+    # Get style
+    style_id = get_style_id(project_uuid)
+    style = get_style(style_id)
+
+    # Build timeline messages
+    messages = build_character_timeline_messages(script_content, characters, style)
+
+    # Call Fireworks AI
+    client = FireworksClient()
+    try:
+        result = await client.chat_completion(
+            messages=messages,
+            json_schema=CharacterList,
+        )
+    except (AuthenticationError, RateLimitError, APIError) as exc:
+        _handle_fireworks_error(exc)
+
+    # Validate BEFORE persisting
+    try:
+        validated = CharacterList(**result)
+    except ValidationError as exc:
+        logging.error("AI returned data in an unexpected format", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI returned data in an unexpected format",
+        ) from exc
+
+    # Default base_name to name for entries lacking it
+    for char in validated.characters:
+        if not char.base_name:
+            char.base_name = char.name
+
+    # Guard: every entry name must be unique
+    names = [char.name for char in validated.characters]
+    if len(names) != len(set(names)):
+        logging.error("Character timeline contains duplicate names")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Character timeline contains duplicate names",
+        )
+
+    # Guard: every original base_name/person must yield at least one version
+    original_base_names = set()
+    for char in characters:
+        base = char.get("base_name", "") or char.get("name", "")
+        original_base_names.add(base)
+
+    result_base_names = set(char.base_name for char in validated.characters)
+    missing = original_base_names - result_base_names
+    if missing:
+        logging.error("Character timeline missing versions for: %s", missing)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Character timeline missing versions for some characters",
+        )
+
+    # Guard: identity_anchor must be consistent per base_name
+    anchor_by_base = {}
+    for char in validated.characters:
+        if char.base_name not in anchor_by_base:
+            anchor_by_base[char.base_name] = char.identity_anchor
+        elif anchor_by_base[char.base_name] != char.identity_anchor:
+            logging.error(
+                "Inconsistent identity_anchor for base_name %s", char.base_name
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Inconsistent identity_anchor across versions",
+            )
+
+    # Persist expanded list
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump(validated.model_dump(), f, indent=2)
+
+    # Update sub-step state
+    set_sub_step_state(project_uuid, "step_2_timeline_complete", True)
 
     return validated
 
@@ -142,7 +289,11 @@ async def get_characters(project_uuid: str):
         )
     with open(characters_path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    return CharacterList(**data)
+    validated = CharacterList(**data)
+    for char in validated.characters:
+        if not char.base_name:
+            char.base_name = char.name
+    return validated
 
 
 @characters_router.put(
@@ -151,10 +302,17 @@ async def get_characters(project_uuid: str):
 )
 async def update_characters(project_uuid: str, characters: CharacterList):
     """Accept an edited character list and persist it to characters.json."""
+    # Re-derive base_name defaults for any entry missing it
+    for char in characters.characters:
+        if not char.base_name:
+            char.base_name = char.name
+
     project_dir = os.path.join(_projects_module.PROJECTS_BASE_DIR, project_uuid)
     characters_path = os.path.join(project_dir, "characters.json")
     with open(characters_path, "w", encoding="utf-8") as f:
         json.dump(characters.model_dump(), f, indent=2)
+
+    await invalidate_downstream(project_uuid, 2)
     return characters
 
 

@@ -5,6 +5,26 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-06-08 — Character Versions
+
+### Added
+- **Character versions with timeline pass** (`backend/routers/characters.py`) — New `POST /api/v1/projects/{uuid}/characters/timeline` endpoint. Detects per-character versions (e.g., "Alice (young)", "Alice (old)") from the script. Adds `base_name`, `version_label`, `version_index`, `appears_from`, and `identity_anchor` fields. Guards: duplicate names → 502, missing persons → 502, inconsistent `identity_anchor` per `base_name` → 502. Persists to `characters.json` and sets `step_2_timeline_complete` sub-step state.
+- **Identity anchoring** (`backend/models/characters.py`, `backend/services/prompts.py`) — `identity_anchor` is duplicated across all versions of the same `base_name` to keep generated images consistent. Call 2 (front profile + turnaround) prompt builders inject `identity_anchor` and `version_label` into the system prompt for each version.
+- **Per-segment character resolution + override** (`backend/routers/segments.py`) — Pass 2 resolves which version of each character appears in each segment based on `appears_from` timestamps. `characters_present` stores versioned names (e.g., `Alice (young)`). Flashback / non-monotonic timeline support: if a segment's time is before a version's `appears_from`, it resolves to the earliest version.
+- **Single-segment prompt regeneration** (`backend/routers/segments.py`) — New `POST /api/v1/projects/{uuid}/segments/{segment_index}/prompt` endpoint. Accepts optional `character_versions` dict to pin specific versions for the segment. Updates only the target segment's `segment_prompt` and `characters_present` without touching others.
+- **Version-management UI** (`frontend/src/pages/Step2Characters.tsx`) — Timeline pass button, version list display, `identity_anchor` preview, and per-version prompt cards.
+- **Per-segment override UI** (`frontend/src/pages/Step3Segments.tsx`) — Regenerate button per segment with version override dropdown. Shows `characters_present` as versioned badges.
+
+### Changed
+- **Pass 2 Rule 9 (within-version consistency)** (`backend/services/prompts.py`) — Updated segment prompt system prompt to require that consecutive segments featuring the same character version must keep visual details consistent (clothing, age expression, props) unless the script explicitly describes a change.
+- **Character-edit invalidation** (`backend/routers/characters.py`, `backend/services/state.py`) — `PUT /api/v1/projects/{uuid}/characters` now resets downstream state (Steps 3–5) and deletes `segments.json` when characters are edited. Previously edits did not invalidate downstream segments, causing stale prompts.
+
+### Fixed
+- **Backward-compatible schema loading for pre-version `characters.json`** (`backend/models/characters.py`) — Projects with legacy `characters.json` (lacking `base_name`, `version_label`, `version_index`, `identity_anchor`, `appears_from`, `front_profile_prompt`, `turnaround_prompt`) load without `ValidationError`. Missing fields default to: `base_name` = `name`, `version_label` = `"default"`, `version_index` = `0`, `identity_anchor` = `""`, `appears_from` = `""`, prompts = `""`. Call 2 and GET endpoints both normalize on read.
+
+### Testing
+- 172 backend tests passed (0 failures); `tsc --noEmit` → 0 errors.
+
 ## [0.7.3] — 2026-06-08 — Test Isolation + Delete Atomicity
 
 ### Fixed
@@ -713,7 +733,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## File Inventory
 
-### Backend (34 Python files)
+### Backend (37 Python files)
 ```
 backend/main.py
 backend/models/database.py
@@ -741,6 +761,7 @@ backend/tests/__init__.py
 backend/tests/conftest.py
 backend/tests/test_projects.py
 backend/tests/test_characters.py
+backend/tests/test_character_timeline.py
 backend/tests/test_segments.py
 backend/tests/test_images.py
 backend/tests/test_fireworks.py
@@ -748,6 +769,8 @@ backend/tests/test_video.py
 backend/tests/test_prompts.py
 backend/tests/test_schema_flatten.py
 backend/tests/test_style_state.py
+backend/tests/isolation_modules.py
+backend/tests/test_isolation.py
 backend/utils/__init__.py
 ```
 
@@ -813,13 +836,15 @@ frontend/components.json
 | **v0.7.1** | 149 | 73* | 222 |
 | **v0.7.2** | 151 | 73* | 224 |
 | **v0.7.3** | 154 | 73* | 227 |
+| **v0.8.0** | 172 | 73* | 245 |
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.7.3 — 154 tests)
+### Backend Test Breakdown (v0.8.0 — 172 tests)
 - `test_fireworks.py` — 9 tests (client, base_url, retry logic, json_schema, error handling)
-- `test_characters.py` — 16 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT)
-- `test_segments.py` — 18 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions)
+- `test_characters.py` — 22 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2)
+- `test_character_timeline.py` — 6 tests (happy path, 409 no-characters, 502 duplicate name, 502 missing person, 502 inconsistent anchor, single version default)
+- `test_segments.py` — 24 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index)
 - `test_images.py` — 13 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status)
 - `test_projects.py` — 17 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript, voiceover re-upload, invalidate_downstream, delete atomicity)
 - `test_video.py` — 47 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters)
@@ -854,6 +879,7 @@ frontend/components.json
 
 ### Characters
 - `POST /api/v1/projects/{uuid}/characters/extract` — Extract characters from script
+- `POST /api/v1/projects/{uuid}/characters/timeline` — Generate character timeline versions
 - `POST /api/v1/projects/{uuid}/characters/prompts` — Generate character prompts
 - `GET /api/v1/projects/{uuid}/characters` — Get character list
 - `PUT /api/v1/projects/{uuid}/characters` — Update characters
@@ -866,6 +892,7 @@ frontend/components.json
 - `PUT /api/v1/projects/{uuid}/segments/{segment_index}/effect` — Update segment effect
 - `POST /api/v1/projects/{uuid}/segments/{segment_index}/split` — Split segment
 - `POST /api/v1/projects/{uuid}/segments/{segment_index}/merge` — Merge segments
+- `POST /api/v1/projects/{uuid}/segments/{segment_index}/prompt` — Regenerate single segment prompt
 
 ### Images
 - `POST /api/v1/projects/{uuid}/images/{segment_index}` — Upload image

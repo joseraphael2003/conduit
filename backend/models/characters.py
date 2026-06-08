@@ -8,6 +8,11 @@ class CharacterDescription(BaseModel):
     type: Literal["speaking", "creature", "npc_entity"]
     importance: Literal["major", "minor"]
     description: str
+    base_name: str = ""
+    version_label: str = "default"
+    version_index: int = 0
+    appears_from: str = ""
+    identity_anchor: str = ""
 
 
 class CharacterList(BaseModel):

@@ -347,7 +347,7 @@ If the user does NOT provide an original script:
 
 **Mandatory step.** Every story has characters, so this step is always required. There is no skip option.
 
-Step 2 is split into **two distinct LLM calls** to separate character understanding from prompt generation.
+Step 2 is split into **three distinct LLM calls** to separate character understanding from prompt generation, with a timeline pass that detects character versions (e.g., age transformations, alternate forms) before prompt generation.
 
 ### 4.1 Call 1 — Character Extraction
 
@@ -379,6 +379,11 @@ For each entity, output:
 ```python
 class CharacterDescription(BaseModel):
     name: str
+    base_name: str  # shared root name across versions
+    version_label: str  # "default" | "young" | "old" | ...
+    version_index: int  # zero-based ordering within base group
+    appears_from: str  # script marker where this version first appears
+    identity_anchor: str  # shared facial-identity descriptors for this base_name
     type: str  # "speaking" | "creature" | "npc_entity"
     importance: str  # "major" | "minor"
     description: str
@@ -390,11 +395,35 @@ class CharacterList(BaseModel):
 **UI after Call 1:**
 - Table of extracted characters with name, type, importance, and description
 - **User can edit descriptions** before proceeding
-- **Generate Prompts button** triggers Call 2
+- **Detect Versions button** triggers the timeline pass (enabled after Call 1)
+- **Generate Prompts button** triggers Call 2 (enabled after timeline pass completes)
+
+### 4.1b Timeline Pass — Detect Versions
+
+**Goal:** After Call 1 extracts all characters, analyze the script to detect whether any character appears in multiple visual versions (e.g., age changes, transformations, alternate forms). Each version gets a distinct entry with a shared `base_name` and `identity_anchor`.
+
+**Rules for version detection:**
+- A new version is created when the script explicitly describes a visual transformation (age, body, role — not just costume changes).
+- Single-appearance characters get exactly one version: `version_label="default"`, `version_index=0`.
+- The `identity_anchor` must be **identical** across all versions of the same `base_name` (stable facial/anatomical traits).
+- Each version gets a unique `name` (e.g., `"Alice (young)"`, `"Alice (old)"`) derived from `base_name` + `version_label`.
+
+**Endpoint:** `POST /projects/{uuid}/characters/timeline`
+- Requires `characters.json` from Call 1.
+- Reads `source_of_truth_script.txt`.
+- Calls Fireworks AI with structured output (`CharacterList`).
+- Validates: every original `base_name` yields ≥1 version, `identity_anchor` is consistent per `base_name`, all `name` values are unique.
+- Persists expanded list to `characters.json` and sets `step_2_timeline_complete=True`.
+
+**UI after timeline pass:**
+- Characters are grouped by `base_name` in collapsible sections.
+- Shared `identity_anchor` is editable once per group (writes to all versions).
+- Per-version fields editable: `version_label`, `appears_from`, `description`.
+- **Add Version** / **Remove Version** buttons per group.
 
 ### 4.2 Call 2 — Prompt Generation
 
-**Goal:** Generate front_profile_prompt and turnaround_prompt for each character using the finalized descriptions.
+**Goal:** Generate `front_profile_prompt` and `turnaround_prompt` for each character **version** using the finalized descriptions, injecting the `identity_anchor` to preserve facial consistency across versions.
 
 **Prompt:**
 ```xml
@@ -445,6 +474,11 @@ For non-humanoid or hybrid characters, replace shoe/clothing detail shots with a
 All three turnaround views and all detail shots must depict the exact same character
 Always end with the consistency and no text line
 
+**Version consistency rules:**
+- For each character version, preserve the `identity_anchor` (stable facial/anatomical traits) across all versions of the same `base_name`.
+- Respect `version_label` and `appears_from` to render the correct life-stage in the prompt.
+- Do NOT mix traits from different versions into the same prompt.
+
 Important rules:
 - For minor characters with minimal description, keep the prompt shorter but still fully specified.
 - For major characters, provide more detailed prompts.
@@ -459,7 +493,7 @@ Important rules:
 **Output schema:**
 ```python
 class CharacterPrompts(BaseModel):
-    name: str
+    name: str  # unique version name, e.g., "Alice (young)"
     front_profile_prompt: str
     turnaround_prompt: str
 
@@ -471,9 +505,10 @@ class CharacterPromptsList(BaseModel):
 
 - **Dropdown:** Select AI model (for image generation) — this is just a UI label; no actual model is called here
 - **Step 1 — Extract Characters button:** Triggers Call 1 (extraction)
-- **Step 2 — Generate Prompts button:** Triggers Call 2 (prompt generation, enabled after editing)
-- **Display after Call 2:** Cards for each character
-  - Name
+- **Step 1b — Detect Versions button:** Triggers the timeline pass (enabled after Call 1)
+- **Step 2 — Generate Prompts button:** Triggers Call 2 (prompt generation, enabled after timeline pass and editing)
+- **Display after Call 2:** Cards for each character **version**
+  - Name (e.g., "Alice (young)")
   - Type badge (speaking / creature / npc_entity)
   - Importance badge (major / minor)
   - **Front Profile Prompt** — copy-paste ready for Gemini/Flow (single image)
@@ -485,15 +520,21 @@ class CharacterPromptsList(BaseModel):
 **After Call 1 (extraction):**
 | File | Description |
 |------|-------------|
-| `characters.json` | Extracted characters with descriptions (no prompts yet) |
+| `characters.json` | Extracted characters with descriptions (single version per character, `version_label="default"`) |
+
+**After Timeline Pass:**
+| File | Description |
+|------|-------------|
+| `characters.json` | Expanded to one entry per version, grouped by `base_name`, with `identity_anchor` |
 
 **After Call 2 (prompt generation):**
 | File | Description |
 |------|-------------|
-| `characters.json` | Extracted characters with front_profile_prompt and turnaround_prompt |
+| `characters.json` | Each version entry now includes `front_profile_prompt` and `turnaround_prompt` |
 
 **State tracking:**
 - `step_2_call_1_completed`: true after extraction
+- `step_2_timeline_complete`: true after timeline pass
 - `step_2_call_2_completed`: true after prompt generation
 
 ---
@@ -653,8 +694,13 @@ For each segment, output:
    - If a character is visually present in the segment, include their name in characters_present as @Name.
    - If a character is mentioned but not shown (e.g., "Alice thought about Bob"), do NOT include @Bob unless Bob is visible in the scene.
 
-9. **Consistency:**
-   - Maintain visual consistency across segments. If Segment 1 is "dark forest at twilight," Segment 2 in the same forest should not suddenly be "bright sunny meadow" unless the script explicitly describes a time/location change.
+9. **Version resolution:** For each character present, pick the version whose `appears_from` boundary the segment's `script_line` falls into. Judge based on the segment's own content — do not assume versions change in segment order; flashbacks may revisit earlier versions.
+    - Example: If a segment occurs before "Chapter 5 — Twenty years later," use `"Alice (young)"`; if after, use `"Alice (old)"`.
+    - Include the versioned name in `characters_present` (e.g., `["@Alice (young)"]`).
+
+10. **Consistency:**
+    - Maintain visual consistency within a character version. If Segment 1 is "dark forest at twilight," Segment 2 in the same forest should not suddenly be "bright sunny meadow" unless the script explicitly describes a time/location change.
+    - When the script crosses a version boundary (e.g., a time skip or transformation), switch deliberately to the new version's appearance; do not carry the old appearance across the boundary, and do not change appearance without a boundary.
 
 ## Example Good Prompt
 
@@ -672,12 +718,13 @@ segment_prompt: "A dark forest at twilight. Ancient gnarled trees with twisted b
 
 ## Character Profile Usage
 
-You are provided with the character list (name, description, front_profile_prompt, turnaround_prompt).
+You are provided with the character list (name, base_name, version_label, description, front_profile_prompt, turnaround_prompt).
 When a character appears in a segment:
-1. Extract their key visual traits from the description (hair, clothing, build, expression)
-2. Describe them briefly in the scene context (e.g., "Alice in her red wool coat, determined expression")
-3. Do NOT paste the full profile prompt into the segment prompt
-4. Tag them in characters_present as @Name
+1. Resolve the correct version for the segment's place in the script (see Rule 9: Version resolution).
+2. Extract the version's key visual traits from the description (hair, clothing, build, expression)
+3. Describe them briefly in the scene context (e.g., "Alice (young) in her red wool coat, determined expression")
+4. Do NOT paste the full profile prompt into the segment prompt
+5. Tag them in characters_present using the unique version name (e.g., `@Alice (young)`)
 
 Return ONLY a JSON object with a "segments" array.
 </system>
@@ -697,10 +744,12 @@ class SegmentPrompt(BaseModel):
     segment_index: int
     script_line: str
     segment_prompt: str
-    characters_present: List[str]  # ["@Alice"]
+    characters_present: List[str]  # ["@Alice (young)"]
     start_time: float
     end_time: float
     duration: float
+    image_path: Optional[str]  # set in Step 4
+    effect: Optional[str]  # assigned in Step 5
 
 class SegmentPrompts(BaseModel):
     segments: List[SegmentPrompt]
@@ -767,10 +816,12 @@ class SegmentPrompt(BaseModel):
     segment_index: int
     script_line: str
     segment_prompt: str
-    characters_present: List[str]  # ["@Alice"]
+    characters_present: List[str]  # ["@Alice (young)"]
     start_time: float
     end_time: float
     duration: float  # computed
+    image_path: Optional[str]  # set in Step 4
+    effect: Optional[str]  # assigned in Step 5
 
 class SegmentPrompts(BaseModel):
     segments: List[SegmentPrompt]
@@ -783,7 +834,9 @@ class SegmentPrompts(BaseModel):
   - Script line
   - Start → End time
   - Segment prompt
-  - Characters present
+  - Characters present (versioned names, e.g., `@Alice (young)`)
+  - **Version dropdown** for multi-version characters (allows overriding the auto-resolved version)
+  - **Regenerate button** per segment (triggers single-segment prompt regeneration)
 - **Editable:** User can edit segment prompts before proceeding
 - **Split/Merge:** User can manually split or merge segments
 
@@ -792,6 +845,20 @@ class SegmentPrompts(BaseModel):
 | File | Description |
 |------|-------------|
 | `segments.json` | All segment prompts with timing and metadata |
+
+### 5.7.1 API Endpoints
+
+**Pass 1:** `POST /projects/{uuid}/segments/breakdown` — Break script into segments with timestamps.
+
+**Pass 2:** `POST /projects/{uuid}/segments/prompts` — Generate image prompts for all segments (single call or overlapping-batch fallback).
+
+**Single-segment regeneration:** `POST /projects/{uuid}/segments/{segment_index}/prompt`
+- Optional body: `character_versions: Dict[str, str]` (map `base_name` → chosen version `name`).
+- Loads the specific segment + `characters.json`, optionally filters to the chosen versions, and regenerates only that segment's prompt.
+- Writes back to `segments.json` without touching other segments, preserving `image_path` and `effect`.
+- Returns `SegmentPrompt`.
+
+**Character timeline:** `POST /projects/{uuid}/characters/timeline` — Detect versions per character (see §4.1b).
 
 ---
 
@@ -1014,9 +1081,44 @@ project/
   "characters": [
     {
       "name": "Alice",
+      "base_name": "Alice",
+      "version_label": "default",
+      "version_index": 0,
+      "appears_from": "",
+      "identity_anchor": "",
       "type": "speaking",
       "importance": "major",
       "description": "Young woman, 20s, human, long auburn hair loose, fair skin, slender build, green eyes, almond shape, determined expression, oval face, slight frown, wearing a red wool coat over a dark turtleneck, leather boots"
+    }
+  ]
+}
+```
+
+**`characters.json` (after Timeline Pass — two versions of Alice):**
+```json
+{
+  "characters": [
+    {
+      "name": "Alice (young)",
+      "base_name": "Alice",
+      "version_label": "young",
+      "version_index": 0,
+      "appears_from": "Chapter 1 — Alice arrives in the village",
+      "identity_anchor": "oval face, green almond eyes, fair skin, slender build, long auburn hair",
+      "type": "speaking",
+      "importance": "major",
+      "description": "Young woman, 20s, wearing a red wool coat over a dark turtleneck, leather boots"
+    },
+    {
+      "name": "Alice (old)",
+      "base_name": "Alice",
+      "version_label": "old",
+      "version_index": 1,
+      "appears_from": "Chapter 5 — Twenty years later",
+      "identity_anchor": "oval face, green almond eyes, fair skin, slender build, long auburn hair streaked with gray",
+      "type": "speaking",
+      "importance": "major",
+      "description": "Elderly woman, 60s, weathered face, walking with a cane, wearing a simple gray shawl"
     }
   ]
 }
@@ -1027,12 +1129,17 @@ project/
 {
   "characters": [
     {
-      "name": "Alice",
+      "name": "Alice (young)",
+      "base_name": "Alice",
+      "version_label": "young",
+      "version_index": 0,
+      "appears_from": "Chapter 1 — Alice arrives in the village",
+      "identity_anchor": "oval face, green almond eyes, fair skin, slender build, long auburn hair",
       "type": "speaking",
       "importance": "major",
-      "description": "Young woman, 20s, human, long auburn hair loose, fair skin, slender build, green eyes, almond shape, determined expression, oval face, slight frown, wearing a red wool coat over a dark turtleneck, leather boots",
-      "front_profile_prompt": "Secret Level / Love Death and Robots style animation, photorealistic 3D render, cinematic lighting, subsurface skin scattering, physically based rendering, hyper-detailed face, face depth, realistic eyes, volumetric lighting, sharp detailed textures, clean render, young woman, 20s, human, long auburn hair loose, fair skin, slender build, green eyes, almond shape, determined expression, oval face, slight frown, wearing a red wool coat over a dark turtleneck, leather boots, medium shot, upper body and face, dark forest background, soft golden light, no text, no watermark, no logo",
-      "turnaround_prompt": "Secret Level / Love Death and Robots style animation, photorealistic 3D render, character turnaround reference sheet, professional character modeling sheet, cinematic lighting, subsurface skin scattering, physically based rendering, hyper-detailed face, face depth, realistic eyes, sharp detailed textures, clean render, pure white background, landscape composition, no text, no watermark, no logo, young woman, 20s, human, long auburn hair loose, fair skin, slender build, green eyes, almond shape, determined expression, oval face, slight frown, wearing a red wool coat over a dark turtleneck, leather boots, three-view turnaround, front and left-side profile and back, identical proportions, natural standing pose, arms at sides, eye-level camera, upper-right shows six head angles, front-facing and slight downward and back of head and left-side profile and near-side comparison and 3/4 profile, lower-right shows six close-up detail shots, upper garment texture and lower body clothing and hip detail and leg texture and eyes and facial features and full shoe close-up, strict character consistency, no cropping, no extra props, no text, no logo, no watermark"
+      "description": "Young woman, 20s, wearing a red wool coat over a dark turtleneck, leather boots",
+      "front_profile_prompt": "Secret Level / Love Death and Robots style animation, photorealistic 3D render, cinematic lighting, subsurface skin scattering, physically based rendering, hyper-detailed face, face depth, realistic eyes, volumetric lighting, sharp detailed textures, clean render, oval face, green almond eyes, fair skin, slender build, long auburn hair, young woman, 20s, wearing a red wool coat over a dark turtleneck, leather boots, medium shot, upper body and face, dark forest background, soft golden light, no text, no watermark, no logo",
+      "turnaround_prompt": "Secret Level / Love Death and Robots style animation, photorealistic 3D render, character turnaround reference sheet, professional character modeling sheet, cinematic lighting, subsurface skin scattering, physically based rendering, hyper-detailed face, face depth, realistic eyes, sharp detailed textures, clean render, pure white background, landscape composition, no text, no watermark, no logo, oval face, green almond eyes, fair skin, slender build, long auburn hair, young woman, 20s, wearing a red wool coat over a dark turtleneck, leather boots, three-view turnaround, front and left-side profile and back, identical proportions, natural standing pose, arms at sides, eye-level camera, upper-right shows six head angles, front-facing and slight downward and back of head and left-side profile and near-side comparison and 3/4 profile, lower-right shows six close-up detail shots, upper garment texture and lower body clothing and hip detail and leg texture and eyes and facial features and full shoe close-up, strict character consistency, no cropping, no extra props, no text, no logo, no watermark"
     }
   ]
 }
@@ -1045,8 +1152,8 @@ project/
     {
       "segment_index": 1,
       "script_line": "Alice walked through the dark forest.",
-      "segment_prompt": "Cinematic wide shot, a dark forest at twilight, dense trees with golden rays filtering through the canopy. Alice in her red coat, looking worried, standing on a mossy path. Misty atmosphere, warm desaturated colors.",
-      "characters_present": ["@Alice"],
+      "segment_prompt": "Cinematic wide shot, a dark forest at twilight, dense trees with golden rays filtering through the canopy. Alice (young) in her red coat, looking worried, standing on a mossy path. Misty atmosphere, warm desaturated colors.",
+      "characters_present": ["@Alice (young)"],
       "start_time": 0.0,
       "end_time": 5.0,
       "duration": 5.0,
@@ -1294,9 +1401,43 @@ Extract:
 
 For each entity, output:
 - name: the canonical name
+- base_name: the shared root name (same as name for initial extraction)
+- version_label: "default" for initial extraction
+- version_index: 0 for initial extraction
+- appears_from: ""
+- identity_anchor: ""
 - type: "speaking" | "creature" | "npc_entity"
 - importance: "major" if the entity appears in multiple scenes or is central to the plot. "minor" if they appear once or are background.
 - description: a detailed visual description of the character's appearance, clothing, and expression. If the script does not describe them in detail, infer a visually interesting design that fits the narrative. Do NOT leave fields blank.
+
+Return ONLY a JSON object with a "characters" array.
+```
+
+### B.3b Character Timeline Pass (Detect Versions)
+
+```
+You are a character version detection engine. Given the source-of-truth script and the list of characters extracted in Call 1, identify whether any character appears in multiple distinct visual versions.
+
+A new version is created when the script explicitly describes a visual transformation:
+- Age change (young → old)
+- Body transformation (human → creature, etc.)
+- Role change that alters physical appearance (not just costume changes)
+
+For each version, output:
+- name: unique display name (e.g., "Alice (young)", "Alice (old)")
+- base_name: shared root name (e.g., "Alice")
+- version_label: human-readable label (e.g., "young", "old", "default")
+- version_index: zero-based ordering within the base group
+- appears_from: script text or chapter marker where this version first appears
+- identity_anchor: shared facial-identity descriptors duplicated across all versions of the same base_name
+- type: inherited from Call 1
+- importance: inherited from Call 1
+- description: visual description specific to this version
+
+Rules:
+- Single-appearance characters get exactly one version: version_label="default", version_index=0.
+- The identity_anchor must be identical across all versions of the same base_name.
+- Do NOT leave fields blank.
 
 Return ONLY a JSON object with a "characters" array.
 ```
@@ -1350,13 +1491,18 @@ For non-humanoid or hybrid characters, replace shoe/clothing detail shots with a
 All three turnaround views and all detail shots must depict the exact same character
 Always end with the consistency and no text line
 
+**Version consistency rules:**
+- For each character version, preserve the identity_anchor (stable facial/anatomical traits) across all versions of the same base_name.
+- Respect version_label and appears_from to render the correct life-stage in the prompt.
+- Do NOT mix traits from different versions into the same prompt.
+
 Important rules:
 - For minor characters with minimal description, keep the prompt shorter but still fully specified.
 - For major characters, provide more detailed prompts.
 - Do NOT leave fields blank.
 
-For each character, output:
-- name: the canonical name
+For each character version, output:
+- name: the unique version name (e.g., "Alice (young)")
 - front_profile_prompt: the single image prompt (Prompt A)
 - turnaround_prompt: the reference sheet prompt (Prompt B)
 
@@ -1408,19 +1554,21 @@ For each segment, output:
 
 7. Length: Keep prompts to 3–6 lines, comma-separated.
 
-8. Character references: If a character is visually present, include @Name in characters_present.
-   If mentioned but not shown, do NOT include them.
+8. Character references: If a character is visually present, include the versioned @Name in characters_present.
+    If mentioned but not shown, do NOT include them.
 
-9. Consistency: Maintain visual consistency across segments. If Segment 1 is "dark forest at twilight,"
-   Segment 2 in the same forest should not suddenly be "bright sunny meadow" unless the script explicitly describes a change.
+9. Version resolution: For each character present, pick the version whose appears_from boundary the segment's script_line falls into. Judge based on the segment's own content — do not assume versions change in segment order; flashbacks may revisit earlier versions.
+
+10. Consistency: Maintain visual consistency within a character version. When the script crosses a version boundary (e.g., a time skip or transformation), switch deliberately to the new version's appearance; do not carry the old appearance across the boundary, and do not change appearance without a boundary.
 
 ## Character Profile Usage
 
 When a character appears in a segment:
-1. Extract their key visual traits from the description (hair, clothing, build, expression)
-2. Describe them briefly in the scene context (e.g., "Alice in her red wool coat, determined expression")
-3. Do NOT paste the full profile prompt into the segment prompt
-4. Tag them in characters_present as @Name
+1. Resolve the correct version for the segment's place in the script (see Rule 9: Version resolution).
+2. Extract the version's key visual traits from the description (hair, clothing, build, expression)
+3. Describe them briefly in the scene context (e.g., "Alice (young) in her red wool coat, determined expression")
+4. Do NOT paste the full profile prompt into the segment prompt
+5. Tag them in characters_present using the unique version name (e.g., @Alice (young))
 
 Return ONLY a JSON object with a "segments" array.
 ```

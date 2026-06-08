@@ -35,6 +35,39 @@ const mockCharactersWithPrompts = [
   },
 ];
 
+const mockCharactersWithVersions = [
+  {
+    name: 'Alice',
+    base_name: 'Alice',
+    type: 'speaking',
+    importance: 'major',
+    description: 'A curious explorer.',
+    version_label: 'default',
+    version_index: 0,
+    appears_from: '00:00:00',
+  },
+  {
+    name: 'Alice (v2)',
+    base_name: 'Alice',
+    type: 'speaking',
+    importance: 'major',
+    description: 'A curious explorer in a dark cave.',
+    version_label: 'dark cave',
+    version_index: 1,
+    appears_from: '00:05:00',
+  },
+  {
+    name: 'Bob',
+    base_name: 'Bob',
+    type: 'speaking',
+    importance: 'minor',
+    description: 'A loyal companion.',
+    version_label: 'default',
+    version_index: 0,
+    appears_from: '',
+  },
+];
+
 test.describe('Step 2 — Characters', () => {
   test.beforeEach(async ({ page }) => {
     // Mock GET /characters
@@ -117,15 +150,15 @@ test.describe('Step 2 — Characters', () => {
     await page.screenshot({ path: 'test-results/step2-character-table.png' });
   });
 
-  test('Generate Prompts button is enabled after editing', async ({ page }) => {
+  test('Generate Prompts button is enabled after extraction', async ({ page }) => {
     await page.locator('button', { hasText: 'Extract Characters' }).click();
     await page.waitForSelector('table tbody tr');
 
     const generateBtn = page.locator('button', { hasText: 'Generate Prompts' });
-    await expect(generateBtn).toBeDisabled();
+    await expect(generateBtn).toBeEnabled();
 
     // Edit a description
-    const textarea = page.locator('table tbody tr:first-child textarea');
+    const textarea = page.locator('textarea').first();
     await textarea.fill('A curious explorer with a new hat.');
 
     await expect(generateBtn).toBeEnabled();
@@ -136,8 +169,8 @@ test.describe('Step 2 — Characters', () => {
     await page.locator('button', { hasText: 'Extract Characters' }).click();
     await page.waitForSelector('table tbody tr');
 
-    // Edit to enable generate button
-    const textarea = page.locator('table tbody tr:first-child textarea');
+    // Edit to trigger prompt generation
+    const textarea = page.locator('textarea').first();
     await textarea.fill('A curious explorer with a new hat.');
 
     await page.locator('button', { hasText: 'Generate Prompts' }).click();
@@ -147,7 +180,7 @@ test.describe('Step 2 — Characters', () => {
     await expect(copyButtons).toHaveCount(2);
 
     // Also check turnaround copy buttons
-    const turnaroundButtons = page.locator('button[aria-label^="Copy turnaround reference prompt"]');
+    const turnaroundButtons = page.locator('button[aria-label^="Copy turnaround prompt"]');
     await expect(turnaroundButtons).toHaveCount(2);
 
     await page.screenshot({ path: 'test-results/step2-prompt-cards.png' });
@@ -157,8 +190,8 @@ test.describe('Step 2 — Characters', () => {
     await page.locator('button', { hasText: 'Extract Characters' }).click();
     await page.waitForSelector('table tbody tr');
 
-    // Edit to enable generate button
-    const textarea = page.locator('table tbody tr:first-child textarea');
+    // Edit to trigger prompt generation
+    const textarea = page.locator('textarea').first();
     await textarea.fill('A curious explorer with a new hat.');
 
     await page.locator('button', { hasText: 'Generate Prompts' }).click();
@@ -174,5 +207,48 @@ test.describe('Step 2 — Characters', () => {
     await expect(pre).toContainText('"front_profile_prompt"');
 
     await page.screenshot({ path: 'test-results/step2-json-toggle.png' });
+  });
+
+  test('Detect Versions button renders after extraction', async ({ page }) => {
+    await page.locator('button', { hasText: 'Extract Characters' }).click();
+    await page.waitForSelector('table tbody tr');
+
+    const detectBtn = page.locator('button', { hasText: 'Detect Versions' });
+    await expect(detectBtn).toBeVisible();
+    await page.screenshot({ path: 'test-results/step2-detect-versions.png' });
+  });
+
+  test('grouped version rendering with 2 versions of one character', async ({ page }) => {
+    await page.unroute(apiBase + '/projects/**/characters/extract');
+    await page.route(
+      apiBase + '/projects/**/characters/extract',
+      async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ characters: mockCharactersWithVersions }),
+        });
+      }
+    );
+
+    await page.locator('button', { hasText: 'Extract Characters' }).click();
+    await page.waitForSelector('table tbody tr');
+
+    const aliceHeader = page.locator('h3', { hasText: 'Alice' });
+    await expect(aliceHeader).toBeVisible();
+
+    const identityAnchorLabel = page.locator('label', { hasText: 'Identity Anchor' }).first();
+    await expect(identityAnchorLabel).toBeVisible();
+
+    const tables = page.locator('table');
+    await expect(tables).toHaveCount(2);
+
+    const aliceRows = tables.nth(0).locator('tbody tr');
+    await expect(aliceRows).toHaveCount(2);
+
+    const bobRows = tables.nth(1).locator('tbody tr');
+    await expect(bobRows).toHaveCount(1);
+
+    await page.screenshot({ path: 'test-results/step2-grouped-versions.png' });
   });
 });

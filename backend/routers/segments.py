@@ -1,9 +1,9 @@
 import logging
 import os
 import json
-from typing import List
+from typing import Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Body, HTTPException, status
 from openai._exceptions import AuthenticationError, RateLimitError, APIError
 
 from models.segments import (
@@ -480,3 +480,71 @@ async def generate_segment_prompts(uuid: str):
         _save_json(state_json_path, state_data)
 
     return SegmentPrompts(segments=[SegmentPrompt(**seg) for seg in updated_segments])
+
+
+@segments_router.post("/projects/{uuid}/segments/{segment_index}/prompt", response_model=SegmentPrompt)
+async def regenerate_segment_prompt(
+    uuid: str,
+    segment_index: int,
+    character_versions: Optional[Dict[str, str]] = Body(default=None, embed=True),
+):
+    """Regenerate the image prompt for a single segment."""
+    conduit_dir = _get_conduit_dir(uuid)
+    segments_path = os.path.join(conduit_dir, "segments.json")
+    characters_path = os.path.join(_get_project_dir(uuid), "characters.json")
+
+    if not os.path.exists(segments_path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="segments.json not found",
+        )
+
+    segments_data = _load_json(segments_path)
+    segments = segments_data.get("segments", [])
+
+    if segment_index < 0 or segment_index >= len(segments):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid segment_index",
+        )
+
+    target_segment = segments[segment_index]
+
+    characters_data = {}
+    if os.path.exists(characters_path):
+        characters_data = _load_json(characters_path)
+
+    if character_versions is not None and characters_data:
+        filtered_chars = []
+        for char in characters_data.get("characters", []):
+            base_name = char.get("base_name", "")
+            if base_name in character_versions:
+                # character_versions maps base_name -> version name (the unique `name` field)
+                if char.get("name", "") == character_versions[base_name]:
+                    filtered_chars.append(char)
+            else:
+                filtered_chars.append(char)
+        characters_data = {"characters": filtered_chars}
+
+    batch = [target_segment]
+
+    client = FireworksClient()
+    try:
+        result = await _generate_prompts_for_batch(batch, characters_data, client, uuid)
+    except (AuthenticationError, RateLimitError, APIError) as exc:
+        _handle_fireworks_error(exc)
+
+    if not isinstance(result, list) or len(result) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Invalid response from Fireworks AI: missing segment result",
+        )
+
+    updated = result[0]
+
+    segments[segment_index]["segment_prompt"] = updated.get("segment_prompt", "")
+    segments[segment_index]["characters_present"] = updated.get("characters_present", [])
+
+    _save_json(segments_path, {"segments": segments})
+
+    return SegmentPrompt(**segments[segment_index])

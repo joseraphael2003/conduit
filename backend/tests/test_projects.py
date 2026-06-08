@@ -1,10 +1,8 @@
 import os
 import json
 import pytest
-import pytest_asyncio
 import httpx
 import respx
-from httpx import Request
 from openai import APIStatusError
 
 # We import the app module for test-client setup
@@ -171,6 +169,7 @@ async def test_invalidate_downstream_step_2(async_client, cleanup_projects, temp
 
     # Set up sub-step state
     state_module.set_sub_step_state(project_uuid, "step_2_call_1_complete", True)
+    state_module.set_sub_step_state(project_uuid, "step_2_timeline_complete", True)
     state_module.set_sub_step_state(project_uuid, "step_2_call_2_complete", True)
     state_module.set_sub_step_state(project_uuid, "step_3_pass_1_complete", True)
     state_module.set_sub_step_state(project_uuid, "step_3_pass_2_complete", True)
@@ -205,9 +204,10 @@ async def test_invalidate_downstream_step_2(async_client, cleanup_projects, temp
     assert sub_state.get("step_3_pass_1_complete") is None
     assert sub_state.get("step_3_pass_2_complete") is None
     assert sub_state.get("step_4_images_uploaded") is None
-    # Step 2 sub-steps preserved
+    # Step 2 sub-steps: call-1 and timeline preserved; call-2 cleared (must rerun after version edit)
     assert sub_state.get("step_2_call_1_complete") is True
-    assert sub_state.get("step_2_call_2_complete") is True
+    assert sub_state.get("step_2_timeline_complete") is True
+    assert sub_state.get("step_2_call_2_complete") is None
 
 
 @pytest.mark.asyncio

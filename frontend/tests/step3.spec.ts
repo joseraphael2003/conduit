@@ -184,4 +184,108 @@ test.describe('Step 3 - Segments', () => {
     await expect(page.locator('h1')).toHaveCSS('font-family', /Playfair Display/);
     await page.screenshot({ path: 'test-results/step3-heading-font.png' });
   });
+
+  test('Version dropdown renders for multi-version character', async ({ page }) => {
+    const mockCharactersWithVersions = [
+      {
+        name: 'Alice',
+        base_name: 'Alice',
+        type: 'speaking',
+        importance: 'major',
+        description: 'A curious explorer.',
+        version_label: 'default',
+        version_index: 0,
+        appears_from: '00:00:00',
+        identity_anchor: 'Blonde hair, blue eyes.',
+      },
+      {
+        name: 'Alice (v2)',
+        base_name: 'Alice',
+        type: 'speaking',
+        importance: 'major',
+        description: 'A curious explorer in a dark cave.',
+        version_label: 'dark cave',
+        version_index: 1,
+        appears_from: '00:05:00',
+        identity_anchor: 'Blonde hair, blue eyes.',
+      },
+    ];
+
+    await page.route(apiBase + '/projects/test-uuid/characters', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ characters: mockCharactersWithVersions }),
+      });
+    });
+
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await injectStyles(page);
+
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Not found' }),
+      });
+    });
+
+    await page.route(apiBase + '/projects/test-uuid/segments/breakdown', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          segments: [
+            { segment_index: 0, script_line: 'Line 1', start_time: 0.0, end_time: 5.0, duration: 5.0, prompt: '', characters: ['Alice'], characters_present: ['Alice'] },
+          ],
+        }),
+      });
+    });
+
+    await page.locator('button', { hasText: 'Generate Segments' }).click();
+    await page.waitForSelector('table tbody tr');
+
+    const select = page.locator('select');
+    await expect(select).toBeVisible();
+    await expect(select).toHaveCount(1);
+
+    const options = select.locator('option');
+    await expect(options).toHaveCount(2);
+    await expect(options.nth(0)).toHaveText('Alice');
+    await expect(options.nth(1)).toHaveText('Alice (v2)');
+
+    await page.screenshot({ path: 'test-results/step3-version-dropdown.png' });
+  });
+
+  test('Regenerate button exists for each segment', async ({ page }) => {
+    await page.route(apiBase + '/projects/test-uuid/segments', async route => {
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Not found' }),
+      });
+    });
+
+    await page.route(apiBase + '/projects/test-uuid/segments/breakdown', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          segments: [
+            { segment_index: 0, script_line: 'Line 1', start_time: 0.0, end_time: 5.0, duration: 5.0, prompt: '', characters: ['Alice'] },
+            { segment_index: 1, script_line: 'Line 2', start_time: 5.0, end_time: 10.0, duration: 5.0, prompt: '', characters: ['Bob'] },
+          ],
+        }),
+      });
+    });
+
+    await page.locator('button', { hasText: 'Generate Segments' }).click();
+    await page.waitForSelector('table tbody tr');
+
+    const regenerateButtons = page.locator('button', { hasText: 'Regenerate' });
+    await expect(regenerateButtons).toHaveCount(2);
+
+    await page.screenshot({ path: 'test-results/step3-regenerate-buttons.png' });
+  });
 });
