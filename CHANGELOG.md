@@ -5,6 +5,25 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] — 2026-06-08 — Test Isolation + Delete Atomicity
+
+### Fixed
+- **Centralized + guarded test `PROJECTS_BASE_DIR` patching** (`backend/tests/isolation_modules.py`, `conftest.py`) — Created a single `PATCHED_MODULES` tuple covering all 7 base-dir modules (`routers.projects`, `services.state`, `routers.segments`, `services.srt`, `routers.images`, `routers.video`, `services.ffmpeg`). `conftest.py` now loops over this tuple to patch and restore, with an in-fixture assertion that fails loudly if any module is not patched. This closes the root cause of orphaned project folders accumulating from test leaks.
+- **`delete_project` now removes files before the DB row** (`backend/routers/projects.py`) — Reordered: verify project exists (SELECT → 404) → `shutil.rmtree` (guarded, 500 on failure, row + folder intact) → DELETE row → 204. A failed `rmtree` can no longer orphan a folder. Removed redundant local `import shutil`.
+
+### Added
+- **Meta-test guarding against unpatched modules** (`backend/tests/test_isolation.py`) — Introspects `routers` and `services` packages, imports every submodule, and asserts any module defining `PROJECTS_BASE_DIR` is present in `PATCHED_MODULES`. Fails with a clear message naming the unpatched module. Would have caught the `services.ffmpeg` leak immediately.
+- **Delete atomicity tests** (`backend/tests/test_projects.py`) — Replaced the weak `test_delete_project` with three tests:
+  - `test_delete_project_removes_folder_and_row` — asserts both DB row and filesystem folder are removed
+  - `test_delete_project_rmtree_failure_no_orphan` — monkeypatches `shutil.rmtree` to raise; asserts 500 response and both row + folder survive (retryable)
+  - `test_delete_project_not_found` — DELETE non-existent UUID returns 404
+
+### Maintenance
+- Removed 10 orphaned project folders (`projects/` directory) that accumulated from prior test leaks. `be3bc4c8` (live project) and `test-setup`/`test-status` preserved.
+
+### Testing
+- 154 backend tests passed (0 failures); `tsc --noEmit` → 0 errors.
+
 ## [0.7.2] — 2026-06-07 — Re-upload Invalidation Fix
 
 ### Fixed
@@ -16,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Direct `invalidate_downstream(1)` test documenting the standalone Step 1 deletion semantics.
 
 ### Testing
-- 149 backend tests passed (0 failures), 73 frontend tests passed, tsc 0 errors.
+- 151 backend tests passed (0 failures); `tsc --noEmit` → 0 errors. Frontend: no code changes this release; Playwright suite not re-run (last recorded 73 specs at v0.6.0).
 
 ## [0.7.1] — 2026-06-07 — Post-0.7.0 Deviation Fixes
 
@@ -792,19 +811,22 @@ frontend/components.json
 | **v0.6.0** | 114 | 73 | 187 |
 | **v0.7.0** | 148 | 73* | 221 |
 | **v0.7.1** | 149 | 73* | 222 |
+| **v0.7.2** | 151 | 73* | 224 |
+| **v0.7.3** | 154 | 73* | 227 |
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.7.1 — 149 tests)
+### Backend Test Breakdown (v0.7.3 — 154 tests)
 - `test_fireworks.py` — 9 tests (client, base_url, retry logic, json_schema, error handling)
 - `test_characters.py` — 16 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT)
 - `test_segments.py` — 18 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions)
 - `test_images.py` — 13 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status)
-- `test_projects.py` — 13 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript)
+- `test_projects.py` — 17 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript, voiceover re-upload, invalidate_downstream, delete atomicity)
 - `test_video.py` — 47 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters)
 - `test_prompts.py` — 29 tests (StyleProfile injection, 5 builders' anchors/rules, SHOT_TYPES, get_style fallback, Pass 2 no-placeholder assertion)
 - `test_schema_flatten.py` — 2 tests (enum survives `_flatten_schema`, Pydantic rejects bad enum)
 - `test_style_state.py` — 2 tests (style_id persisted on create, `get_style_id` default fallback)
+- `test_isolation.py` — 1 test (meta-test: no unpatched PROJECTS_BASE_DIR modules)
 
 ### Frontend Test Breakdown
 - `dashboard.spec.ts` — 5 tests (empty state, Create Project button, project card, fonts, background)

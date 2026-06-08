@@ -9,6 +9,7 @@ from openai import APIStatusError
 
 # We import the app module for test-client setup
 from main import app
+import models.database
 import services.state as state_module
 
 
@@ -56,14 +57,75 @@ async def test_get_project(async_client, cleanup_projects, created_project):
 
 
 @pytest.mark.asyncio
-async def test_delete_project(async_client, cleanup_projects, created_project):
-    """DELETE /api/v1/projects/{uuid} returns 204."""
-    project_uuid = created_project["uuid"]
+async def test_delete_project_removes_folder_and_row(async_client, cleanup_projects, temp_projects_dir):
+    """DELETE removes both filesystem folder and DB row."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Delete Test"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    # Verify folder exists before
+    project_dir = os.path.join(temp_projects_dir, project_uuid)
+    assert os.path.exists(project_dir), "Project folder should exist before delete"
+
+    # Delete
     response = await async_client.delete(f"/api/v1/projects/{project_uuid}")
-    assert response.status_code == 204, f"Expected 204, got {response.status_code}: {response.text}"
-    # Verify deletion
+    assert response.status_code == 204
+
+    # Verify DB row gone
+    db = await models.database.get_db()
+    try:
+        cursor = await db.execute("SELECT count(*) FROM projects WHERE uuid = ?", (project_uuid,))
+        count = (await cursor.fetchone())[0]
+    finally:
+        await db.close()
+    assert count == 0, "DB row should be deleted"
+
+    # Verify folder gone
+    assert not os.path.exists(project_dir), "Project folder should be deleted"
+
+    # Verify GET returns 404
     get_response = await async_client.get(f"/api/v1/projects/{project_uuid}")
-    assert get_response.status_code == 404, "Project should be deleted"
+    assert get_response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_project_rmtree_failure_no_orphan(async_client, cleanup_projects, temp_projects_dir, monkeypatch):
+    """Failed rmtree leaves DB row and folder intact (no orphan)."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Rmtree Fail"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    # Monkeypatch shutil.rmtree to raise
+    def fake_rmtree(path):
+        raise OSError("Permission denied")
+
+    import routers.projects as projects_module
+    monkeypatch.setattr(projects_module.shutil, "rmtree", fake_rmtree)
+
+    # Delete should return 500
+    response = await async_client.delete(f"/api/v1/projects/{project_uuid}")
+    assert response.status_code == 500
+
+    # Verify DB row STILL present
+    db = await models.database.get_db()
+    try:
+        cursor = await db.execute("SELECT count(*) FROM projects WHERE uuid = ?", (project_uuid,))
+        count = (await cursor.fetchone())[0]
+    finally:
+        await db.close()
+    assert count == 1, "DB row should still exist (no orphan)"
+
+    # Verify folder STILL present
+    project_dir = os.path.join(temp_projects_dir, project_uuid)
+    assert os.path.exists(project_dir), "Folder should still exist (no orphan)"
+
+
+@pytest.mark.asyncio
+async def test_delete_project_not_found(async_client):
+    """DELETE non-existent UUID returns 404."""
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response = await async_client.delete(f"/api/v1/projects/{fake_uuid}")
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio

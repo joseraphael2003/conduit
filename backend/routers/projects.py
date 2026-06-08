@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import shutil
 import uuid as uuid_module
 from datetime import datetime, timezone
@@ -126,22 +127,35 @@ async def get_project(project_uuid: str):
 
 @projects_router.delete("/projects/{project_uuid}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(project_uuid: str):
-    """Delete a project by UUID and remove its directory tree."""
+    """Delete a project by UUID and remove its directory tree.
+    
+    Filesystem removal precedes DB deletion so a failed rmtree cannot orphan a folder.
+    """
     db = await get_db()
     try:
-        cursor = await db.execute("DELETE FROM projects WHERE uuid = ?", (project_uuid,))
-        await db.commit()
-        deleted_rows = cursor.rowcount
+        # Verify project exists
+        cursor = await db.execute("SELECT uuid FROM projects WHERE uuid = ?", (project_uuid,))
+        row = await cursor.fetchone()
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     finally:
         await db.close()
 
-    if deleted_rows == 0:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-
     project_dir = os.path.join(PROJECTS_BASE_DIR, project_uuid)
     if os.path.exists(project_dir):
-        import shutil
-        shutil.rmtree(project_dir)
+        try:
+            shutil.rmtree(project_dir)
+        except Exception:
+            logging.error("Failed to delete project files for %s", project_uuid, exc_info=True)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete project files")
+
+    # Delete DB row after successful filesystem removal
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM projects WHERE uuid = ?", (project_uuid,))
+        await db.commit()
+    finally:
+        await db.close()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
