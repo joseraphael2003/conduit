@@ -5,13 +5,27 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] — 2026-06-08 — Stable Segment IDs + Step 3 Fixes
+
+### Fixed
+- **Stable `segment_id` decouples images from mutable segment index** (`backend/models/segments.py`, `backend/routers/segments.py`, `backend/routers/images.py`) — Every segment now carries a unique `segment_id` (UUID). Images are stored as `images/{segment_id}.png` and resolved server-side from the index-addressed API. Split/merge no longer misaligns Step 4 thumbnails or Step 5 video frames.
+- **Lazy migration for legacy projects** (`backend/routers/images.py`) — `get_images_status` and `upload_image` automatically stamp missing `segment_id`s and rename legacy `images/{index:04d}.png` files. Idempotent: no-op once all ids exist.
+- **Step 3 duplicate "Generate Segments" CTA** (`frontend/src/pages/Step3Segments.tsx`) — Top-row button is now gated on `segments.length > 0`, so the empty state shows exactly one CTA (the inline one) and the non-empty state shows the top-row re-run affordance.
+- **Pass 2 prompt-generation truncation 502** (`backend/routers/segments.py`) — `max_tokens` bumped from 4096 to 16000 (same as Pass 1). The `_is_token_limit_error` keyword list now includes `"truncated"`, so truncation errors trigger the overlapping-batch fallback instead of an immediate 502.
+
+### Known Limitation
+- Projects that were already desynced by a pre-0.8.3 split/merge (image files misaligned with segments) cannot be perfectly recovered by the migration — the legacy file renames match the current segment index, but the pre-existing desync may have already moved files to the wrong segment.
+
+### Testing
+- 196 backend tests passed (0 failures); `tsc --noEmit` → 0 errors.
+
 ## [0.8.2] — 2026-06-08 — Split/Merge Prompt Preservation
 
 ### Fixed
 - **`split_segment` and `merge_segment` no longer silently wipe `segment_prompt`, `characters_present`, and `image_path` from untouched segments** (`backend/routers/segments.py`) — Both endpoints now operate on raw dicts (mirroring the 0.8.1 `update_segments`/`get_segments` fix). Untouched segments retain all optional fields. Changed segments (split halves / merged result) are reset with `segment_prompt=""`, `characters_present=[]`, and `image_path` removed for regeneration.
 
 ### Known Limitation
-- Images are stored as `images/{segment_index:04d}.png` and split/merge renumber indices, so existing image files can misalign with segments after re-segmentation — deferred to future work.
+- ~~Images are stored as `images/{segment_index:04d}.png` and split/merge renumber indices, so existing image files can misalign with segments after re-segmentation — deferred to future work.~~ **Resolved in 0.8.3** — stable `segment_id` decouples images from mutable segment index.
 
 ### Testing
 - 183 backend tests passed (0 failures); `tsc --noEmit` → 0 errors.
@@ -869,15 +883,16 @@ frontend/components.json
 | **v0.8.0** | 172 | 73* | 245 |
 | **v0.8.1** | 181 | 73* | 254 |
 | **v0.8.2** | 183 | 73* | 256 |
+| **v0.8.3** | 196 | 73* | 269 |
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.8.2 — 183 tests)
+### Backend Test Breakdown (v0.8.3 — 196 tests)
 - `test_fireworks.py` — 10 tests (client, base_url, retry logic, json_schema, error handling, invalid-JSON guard)
 - `test_characters.py` — 22 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2)
 - `test_character_timeline.py` — 6 tests (happy path, 409 no-characters, 502 duplicate name, 502 missing person, 502 inconsistent anchor, single version default)
-- `test_segments.py` — 34 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502, split preserves other segment fields, merge preserves other segment fields)
-- `test_images.py` — 13 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status)
+- `test_segments.py` — 42 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502, split preserves other segment fields, merge preserves other segment fields, segment_id lifecycle: breakdown/split/merge/update preserve or backfill UUIDs, Pass 2 truncation fix: max_tokens 16000, truncation triggers overlapping-batch fallback, bad JSON without truncation does not fallback)
+- `test_images.py` — 18 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status, image-by-id resolution, lazy migration: stamps missing segment_ids and renames legacy `images/{index:04d}.png` files, migration idempotent)
 - `test_projects.py` — 17 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript, voiceover re-upload, invalidate_downstream, delete atomicity)
 - `test_video.py` — 47 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters)
 - `test_prompts.py` — 29 tests (StyleProfile injection, 5 builders' anchors/rules, SHOT_TYPES, get_style fallback, Pass 2 no-placeholder assertion)

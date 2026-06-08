@@ -1,5 +1,6 @@
 import os
 import json
+import uuid
 import logging
 from io import BytesIO
 from fastapi import APIRouter, HTTPException, status, UploadFile, File
@@ -37,6 +38,40 @@ def _get_image_path(project_uuid: str, segment_index: int) -> str:
     return os.path.join(images_dir, f"{segment_index:04d}.png")
 
 
+def _get_image_path_by_id(project_uuid: str, segment_id: str) -> str:
+    project_dir = _get_project_dir(project_uuid)
+    images_dir = os.path.join(project_dir, "images")
+    os.makedirs(images_dir, exist_ok=True)
+    return os.path.join(images_dir, f"{segment_id}.png")
+
+
+def _resolve_image_path(project_uuid: str, segments: list, segment_index: int) -> str:
+    for segment in segments:
+        if segment.get("segment_index") == segment_index:
+            if segment.get("segment_id"):
+                return _get_image_path_by_id(project_uuid, segment["segment_id"])
+            break
+    return _get_image_path(project_uuid, segment_index)
+
+
+def _ensure_segment_ids_and_migrate(project_uuid: str) -> None:
+    segments_data = _load_segments(project_uuid)
+    segments = segments_data.get("segments", [])
+    changed = False
+    for segment in segments:
+        if not segment.get("segment_id"):
+            segment["segment_id"] = str(uuid.uuid4())
+            changed = True
+            # Rename legacy file if it exists
+            legacy_path = _get_image_path(project_uuid, segment["segment_index"])
+            if os.path.exists(legacy_path):
+                new_path = _get_image_path_by_id(project_uuid, segment["segment_id"])
+                os.rename(legacy_path, new_path)
+                segment["image_path"] = new_path
+    if changed:
+        _save_segments(project_uuid, segments_data)
+
+
 def _load_segments(project_uuid: str) -> dict:
     segments_path = _get_segments_path(project_uuid)
     if not os.path.exists(segments_path):
@@ -71,6 +106,31 @@ async def upload_image(project_uuid: str, segment_index: int, file: UploadFile =
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found",
         )
+
+    _ensure_segment_ids_and_migrate(project_uuid)
+
+    # Load segments and find target segment
+    segments_data = _load_segments(project_uuid)
+    segments = segments_data.get("segments", [])
+
+    target_segment = None
+    for segment in segments:
+        if segment.get("segment_index") == segment_index:
+            target_segment = segment
+            break
+
+    if not target_segment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Segment {segment_index} not found",
+        )
+
+    # Ensure segment_id
+    if not target_segment.get("segment_id"):
+        target_segment["segment_id"] = str(uuid.uuid4())
+        _save_segments(project_uuid, segments_data)
+
+    segment_id = target_segment["segment_id"]
 
     # Read file content
     content = await file.read()
@@ -133,27 +193,11 @@ async def upload_image(project_uuid: str, segment_index: int, file: UploadFile =
         image = image.convert("RGB")
 
     # Save image
-    image_path = _get_image_path(project_uuid, segment_index)
+    image_path = _get_image_path_by_id(project_uuid, segment_id)
     image.save(image_path, "PNG")
 
-    # Update segments.json
-    segments_data = _load_segments(project_uuid)
-    segments = segments_data.get("segments", [])
-
-    # Find segment by index
-    segment_found = False
-    for segment in segments:
-        if segment.get("segment_index") == segment_index:
-            segment["image_path"] = image_path
-            segment_found = True
-            break
-
-    if not segment_found:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Segment {segment_index} not found",
-        )
-
+    # Update segment
+    target_segment["image_path"] = image_path
     _save_segments(project_uuid, segments_data)
 
     return {
@@ -172,6 +216,8 @@ async def get_images_status(project_uuid: str):
             detail="Project not found",
         )
 
+    _ensure_segment_ids_and_migrate(project_uuid)
+
     segments_data = _load_segments(project_uuid)
     segments = segments_data.get("segments", [])
 
@@ -182,7 +228,8 @@ async def get_images_status(project_uuid: str):
     for segment in segments:
         segment_index = segment.get("segment_index")
         if segment_index is not None:
-            image_path = _get_image_path(project_uuid, segment_index)
+            segment_id = segment.get("segment_id")
+            image_path = _get_image_path_by_id(project_uuid, segment_id)
             status_map[str(segment_index)] = os.path.exists(image_path)
 
     return status_map
@@ -198,7 +245,10 @@ async def get_image(project_uuid: str, segment_index: int):
             detail="Project not found",
         )
 
-    image_path = _get_image_path(project_uuid, segment_index)
+    segments_data = _load_segments(project_uuid)
+    segments = segments_data.get("segments", [])
+    image_path = _resolve_image_path(project_uuid, segments, segment_index)
+
     if not os.path.exists(image_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
