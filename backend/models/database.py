@@ -33,6 +33,9 @@ async def apply_migrations(conn: aiosqlite.Connection) -> None:
         );
     """)
 
+    # schema_version is a forward-compat placeholder: migrations are currently
+    # idempotent CREATE TABLE IF NOT EXISTS DDL and this version is not yet read
+    # to gate them. A real migration framework is intentionally out of scope.
     await conn.execute("""
         INSERT OR IGNORE INTO schema_version (version) VALUES (1);
     """)

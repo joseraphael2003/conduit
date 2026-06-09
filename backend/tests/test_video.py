@@ -188,7 +188,7 @@ async def test_video_generate_missing_voiceover(async_client, cleanup_projects, 
         json={"burn_captions": False}
     )
     assert resp.status_code == 404
-    assert "voiceover.mp3" in resp.json()["detail"]
+    assert "voiceover" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -848,7 +848,7 @@ async def test_ffmpeg_generate_video(tmp_path):
          patch("services.ffmpeg.shutil.rmtree") as mock_rmtree:
 
         result = await ffmpeg_module.generate_video(
-            project_dir, segments, voiceover_path, burn_captions=False
+            project_dir, segments, voiceover_path, should_burn_captions=False
         )
 
         assert mock_clip.call_count == 2
@@ -886,13 +886,13 @@ async def test_ffmpeg_generate_video_with_captions(tmp_path):
          patch("services.ffmpeg.generate_segment_clip"), \
          patch("services.ffmpeg.concat_segments", return_value=os.path.join(temp_dir, "concat.mp4")), \
          patch("services.ffmpeg.mix_audio"), \
-         patch("services.ffmpeg._burn_captions_impl") as mock_burn, \
+         patch("services.ffmpeg.burn_captions") as mock_burn, \
          patch("services.ffmpeg._write_progress"), \
          patch("services.ffmpeg.shutil.copy") as mock_copy, \
          patch("services.ffmpeg.shutil.rmtree"):
 
         result = await ffmpeg_module.generate_video(
-            project_dir, segments, voiceover_path, burn_captions=True
+            project_dir, segments, voiceover_path, should_burn_captions=True
         )
 
         assert mock_burn.called
@@ -910,3 +910,102 @@ def _get_vf_arg(cmd):
         if arg == "-vf" and i + 1 < len(cmd):
             return cmd[i + 1]
     raise ValueError("No -vf argument found in command")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 0.8.5 hardening regression tests
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_write_progress_writes_valid_timestamp(tmp_path):
+    """Issue 1: _write_progress must write video_progress + an ISO updated_at
+    without raising (regression for the datetime import bug)."""
+    from datetime import datetime
+
+    project_dir = str(tmp_path / "project")
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    os.makedirs(conduit_dir, exist_ok=True)
+    state_path = os.path.join(conduit_dir, "state.json")
+    with open(state_path, "w", encoding="utf-8") as f:
+        json.dump({"state": "step_4_complete"}, f)
+
+    # Must not raise (the bug raised AttributeError/NameError here).
+    ffmpeg_module._write_progress(project_dir, 50)
+
+    with open(state_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["video_progress"] == 50
+    # updated_at must be a valid ISO 8601 timestamp.
+    datetime.fromisoformat(data["updated_at"])
+
+
+@pytest.mark.asyncio
+async def test_video_status_counts_conduit_segments(async_client, cleanup_projects, video_projects_dir):
+    """Issue 5: get_video_status must count segments from .conduit/segments.json."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Status Count"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    project_dir = os.path.join(video_projects_dir, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    os.makedirs(conduit_dir, exist_ok=True)
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump({"segments": [{"segment_index": i} for i in range(3)]}, f)
+
+    resp = await async_client.get(f"/api/v1/projects/{project_uuid}/video/status")
+    assert resp.status_code == 200
+    assert resp.json()["total_segments"] == 3
+
+
+def test_ffmpeg_path_honors_env(monkeypatch):
+    """Issue 6: FFMPEG_PATH reads CONDUIT_FFMPEG_PATH, defaulting to 'ffmpeg'."""
+    import importlib
+
+    monkeypatch.setenv("CONDUIT_FFMPEG_PATH", "/custom/path/ffmpeg")
+    importlib.reload(ffmpeg_module)
+    assert ffmpeg_module.FFMPEG_PATH == "/custom/path/ffmpeg"
+
+    monkeypatch.delenv("CONDUIT_FFMPEG_PATH", raising=False)
+    importlib.reload(ffmpeg_module)
+    assert ffmpeg_module.FFMPEG_PATH == "ffmpeg"
+
+
+@pytest.mark.asyncio
+async def test_video_generate_finds_wav_voiceover(async_client, cleanup_projects, video_projects_dir):
+    """Issue 4: video generation resolves a .wav voiceover (not only .mp3)."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Wav Voiceover"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    project_dir = os.path.join(video_projects_dir, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    os.makedirs(conduit_dir, exist_ok=True)
+    images_dir = os.path.join(project_dir, "images")
+    os.makedirs(images_dir, exist_ok=True)
+    img_path = os.path.join(images_dir, "0000.png")
+    with open(img_path, "wb") as f:
+        f.write(b"fake_image")
+
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump({"segments": [{
+            "segment_index": 0, "script_line": "Hi.", "start_time": 0.0,
+            "end_time": 1.0, "duration": 1.0, "image_path": img_path,
+        }]}, f)
+
+    # Only a .wav voiceover exists (no .mp3).
+    with open(os.path.join(project_dir, "voiceover.wav"), "wb") as f:
+        f.write(b"RIFF\x00\x00\x00\x00WAVE")
+
+    for step in range(1, 5):
+        await async_client.put(f"/api/v1/projects/{project_uuid}/step/{step}")
+
+    with patch("routers.video.generate_video", return_value=os.path.join(project_dir, "output", "output.mp4")) as mock_gen:
+        resp = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/video/generate",
+            json={"burn_captions": False},
+        )
+        assert resp.status_code == 200, f"got {resp.status_code}: {resp.text}"
+        mock_gen.assert_called_once()
+        # The resolved voiceover path passed to generate_video must be the .wav.
+        passed_voiceover = mock_gen.call_args[0][2]
+        assert passed_voiceover.endswith("voiceover.wav")

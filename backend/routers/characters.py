@@ -282,10 +282,14 @@ async def generate_character_timeline(project_uuid: str):
 
 @characters_router.get(
     "/projects/{project_uuid}/characters",
-    response_model=CharacterList,
 )
 async def get_characters(project_uuid: str):
-    """Retrieve the project's character list from characters.json."""
+    """Retrieve the project's character list from characters.json.
+
+    Returns the raw dict (no response_model) so persisted fields the
+    CharacterDescription schema does not declare — front_profile_prompt and
+    turnaround_prompt — survive on read. (Mirrors the 0.8.1 get_segments fix.)
+    """
     project_dir = os.path.join(_projects_module.PROJECTS_BASE_DIR, project_uuid)
     characters_path = os.path.join(project_dir, "characters.json")
     if not os.path.exists(characters_path):
@@ -295,11 +299,18 @@ async def get_characters(project_uuid: str):
         )
     with open(characters_path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    validated = CharacterList(**data)
-    for char in validated.characters:
-        if not char.base_name:
-            char.base_name = char.name
-    return validated
+    # Normalize version-field defaults on the raw dict so legacy (pre-version)
+    # files load consistently — mirrors the CharacterDescription defaults the
+    # old response_model applied — WITHOUT stripping extra persisted keys
+    # (front_profile_prompt / turnaround_prompt).
+    for char in data.get("characters", []):
+        if not char.get("base_name"):
+            char["base_name"] = char.get("name", "")
+        char.setdefault("version_label", "default")
+        char.setdefault("version_index", 0)
+        char.setdefault("appears_from", "")
+        char.setdefault("identity_anchor", "")
+    return data
 
 
 @characters_router.put(

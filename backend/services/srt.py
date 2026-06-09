@@ -74,8 +74,8 @@ def _wrap_line(text: str, max_length: int = 42) -> str:
 def generate_srt(words: List[dict]) -> str:
     """Generate SRT from word-level timestamps.
 
-    Groups words into sentences (split at . ? !), combines 1-2 sentences
-    per caption, and ensures each line is <= 42 characters.
+    Groups words into sentences (split at . ? !), uses 1 sentence
+    per caption for clarity, and ensures each line is <= 42 characters.
     """
     sentences = _split_into_sentences(words)
     subtitles = []

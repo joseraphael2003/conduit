@@ -42,7 +42,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"error": "An unexpected error occurred. Please try again later."},
+        content={"detail": "An unexpected error occurred. Please try again later."},
     )
 
 # H13: Rate limiting — deliberate won't-fix

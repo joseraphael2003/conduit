@@ -151,12 +151,18 @@ async def generate_video_endpoint(uuid: str, request: VideoGenerateRequest):
             detail=f"{len(missing_images)} segments missing images",
         )
 
-    # Read voiceover.mp3
-    voiceover_path = os.path.join(project_dir, "voiceover.mp3")
-    if not os.path.exists(voiceover_path):
+    # Resolve the voiceover file across the accepted upload extensions
+    # (upload preserves the original extension: .mp3/.wav/.m4a).
+    voiceover_path = None
+    for ext in (".mp3", ".wav", ".m4a"):
+        candidate = os.path.join(project_dir, f"voiceover{ext}")
+        if os.path.exists(candidate):
+            voiceover_path = candidate
+            break
+    if voiceover_path is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="voiceover.mp3 not found",
+            detail="voiceover file not found",
         )
 
     # Calculate total duration
@@ -196,8 +202,11 @@ async def get_video_status(uuid: str):
     project_dir = _get_project_dir(uuid)
     state_json_path = os.path.join(project_dir, ".conduit", "state.json")
 
-    # Read segments.json for total_segments
-    segments_path = os.path.join(project_dir, "segments.json")
+    # Read segments.json for total_segments (.conduit/ is canonical; root is a
+    # backward-compat fallback — mirror the generate endpoint's resolution).
+    segments_path = os.path.join(project_dir, ".conduit", "segments.json")
+    if not os.path.exists(segments_path):
+        segments_path = os.path.join(project_dir, "segments.json")
     total_segments = 0
     if os.path.exists(segments_path):
         with open(segments_path, "r", encoding="utf-8") as f:

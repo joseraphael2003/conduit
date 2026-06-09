@@ -5,6 +5,25 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] — 2026-06-10 — Hardening (Code-Review Fixes)
+
+### Fixed
+- **Video generation crash from a bad `datetime` import** (`backend/services/ffmpeg.py`) — `_write_progress` called `datetime.now(timezone.utc)` while the module did `import datetime` (no `timezone`), raising at runtime after the first segment rendered. Switched to `from datetime import datetime, timezone`. (Masked previously because video tests mocked the pipeline.)
+- **Chunked transcription rewound timestamps for >25 MB audio** (`backend/services/chunking.py`, `backend/routers/projects.py`) — `chunk_audio` now returns `(chunk_path, start_offset_seconds)` tuples and the upload pipeline adds each chunk's original-audio offset to every word's `start`/`end`, so captions and segment timing stay on the absolute timeline (no rewind). The <25 MB single-chunk path is unchanged (offset `0.0`).
+- **`GET /characters` stripped generated prompts** (`backend/routers/characters.py`) — the endpoint returned via `response_model=CharacterList`, which dropped `front_profile_prompt`/`turnaround_prompt` (not declared on `CharacterDescription`), so Step 2 prompt cards vanished on reload. Now returns the raw dict (mirrors the 0.8.1 `get_segments` fix) while still normalizing version-field defaults for legacy files. PUT behavior is unchanged (prompts regenerate via `invalidate_downstream(2)`).
+- **Non-mp3 voiceovers 404'd at video generation** (`backend/routers/video.py`) — upload accepts `.mp3/.wav/.m4a` but generation hardcoded `voiceover.mp3`. Generation now resolves the voiceover across all three extensions.
+- **Video status reported 0 segments** (`backend/routers/video.py`) — `get_video_status` read `segments.json` from the project root, but the canonical location is `.conduit/segments.json`. Now resolves `.conduit/` first (root fallback), so the progress UI shows the real segment count.
+- **Standardized error response shape** (`backend/main.py`) — the global 500 handler returned `{"error": ...}` while every `HTTPException` returns `{"detail": ...}`; unified to `{"detail": ...}` (the frontend already reads `.detail`).
+- **Misleading upload status wording** (`backend/routers/projects.py`) — voiceover upload transcribes synchronously, so the response now reports `processing: false` / "Audio uploaded and transcribed." (was "Transcription in progress").
+
+### Maintenance
+- **ffmpeg path is now configurable** (`backend/services/ffmpeg.py`, `backend/.env.example`) — removed the hardcoded machine-specific path; `FFMPEG_PATH` reads `CONDUIT_FFMPEG_PATH` (default `ffmpeg` on PATH). **Local deployments must set `CONDUIT_FFMPEG_PATH` in `.env` if ffmpeg is not on PATH.**
+- **Removed the `_burn_captions_impl` alias** (`backend/services/ffmpeg.py`) — `generate_video`'s `burn_captions` parameter was renamed to `should_burn_captions`, so it no longer shadows the `burn_captions` function.
+- **Documented deliberate decisions** — synchronous inline video render (single-user localhost) and the `schema_version` forward-compat placeholder; corrected `random_assign_effects` and `generate_srt` docstrings to match behavior.
+
+### Testing
+- 207 backend tests passed (0 failures); `tsc --noEmit` → 0 errors. Added 8 regression tests (write-progress timestamp, chunk offsets, GET-characters prompt preservation + legacy backfill, .wav voiceover resolution, video-status count, ffmpeg-path env, error-shape).
+
 ## [0.8.4] — 2026-06-09 — Character Prompt Truncation Fix
 
 ### Fixed
@@ -893,17 +912,18 @@ frontend/components.json
 | **v0.8.2** | 183 | 73* | 256 |
 | **v0.8.3** | 196 | 73* | 269 |
 | **v0.8.4** | 199 | 73* | 272 |
+| **v0.8.5** | 207 | 73* | 280 |
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.8.4 — 199 tests)
+### Backend Test Breakdown (v0.8.5 — 207 tests)
 - `test_fireworks.py` — 10 tests (client, base_url, retry logic, json_schema, error handling, invalid-JSON guard)
-- `test_characters.py` — 25 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2, extract/timeline/Call-2 max_tokens=16000)
+- `test_characters.py` — 27 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2, extract/timeline/Call-2 max_tokens=16000, GET preserves prompt fields, GET legacy base_name backfill)
 - `test_character_timeline.py` — 6 tests (happy path, 409 no-characters, 502 duplicate name, 502 missing person, 502 inconsistent anchor, single version default)
 - `test_segments.py` — 42 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502, split preserves other segment fields, merge preserves other segment fields, segment_id lifecycle: breakdown/split/merge/update preserve or backfill UUIDs, Pass 2 truncation fix: max_tokens 16000, truncation triggers overlapping-batch fallback, bad JSON without truncation does not fallback)
 - `test_images.py` — 18 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status, image-by-id resolution, lazy migration: stamps missing segment_ids and renames legacy `images/{index:04d}.png` files, migration idempotent)
-- `test_projects.py` — 17 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript, voiceover re-upload, invalidate_downstream, delete atomicity)
-- `test_video.py` — 47 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters)
+- `test_projects.py` — 19 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript, voiceover re-upload, invalidate_downstream, delete atomicity, chunked-transcription offsets, global 500 error shape)
+- `test_video.py` — 51 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters, _write_progress timestamp, status .conduit segment count, FFMPEG_PATH env, .wav voiceover resolution)
 - `test_prompts.py` — 29 tests (StyleProfile injection, 5 builders' anchors/rules, SHOT_TYPES, get_style fallback, Pass 2 no-placeholder assertion)
 - `test_schema_flatten.py` — 2 tests (enum survives `_flatten_schema`, Pydantic rejects bad enum)
 - `test_style_state.py` — 2 tests (style_id persisted on create, `get_style_id` default fallback)

@@ -573,3 +573,72 @@ async def test_invalidate_downstream_step_1(async_client, cleanup_projects, temp
     sub_state = state_module.get_sub_step_state(project_uuid)
     assert sub_state.get("step_2_call_1_complete") is None
     assert sub_state.get("step_3_pass_1_complete") is None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 0.8.5 hardening regression tests
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_chunked_transcription_applies_offsets(async_client, cleanup_projects, temp_projects_dir, monkeypatch):
+    """Issue 2: >25 MB audio is chunked; each chunk's words must be shifted by
+    its original-audio offset so timestamps stay monotonic (no rewind)."""
+    import routers.projects as projects_mod
+
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Chunked"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    # Force the >25 MB branch (gate at projects.py: os.path.getsize > 25_000_000).
+    real_getsize = os.path.getsize
+    monkeypatch.setattr(
+        "routers.projects.os.path.getsize",
+        lambda p: 25_000_001 if str(p).endswith(("voiceover.mp3", "voiceover.wav", "voiceover.m4a")) else real_getsize(p),
+    )
+    # Two chunks at original-audio offsets 0.0s and 30.0s (fake paths; transcribe is mocked).
+    monkeypatch.setattr(
+        "routers.projects.chunk_audio",
+        lambda p: [("/fake/chunk0.wav", 0.0), ("/fake/chunk1.wav", 30.0)],
+    )
+
+    async def fake_transcribe(_path):
+        # Fresh dict each call; chunk-relative timestamps (both start near 0).
+        return {"words": [
+            {"word": "a", "start": 0.0, "end": 0.5},
+            {"word": "b", "start": 1.0, "end": 1.5},
+        ]}
+
+    monkeypatch.setattr("routers.projects.transcribe_audio", fake_transcribe)
+
+    resp = await async_client.post(
+        f"/api/v1/projects/{project_uuid}/voiceover",
+        files={"file": ("voiceover.mp3", b"\xff\xfb\x90\x00", "audio/mpeg")},
+    )
+    assert resp.status_code == 202, f"got {resp.status_code}: {resp.text}"
+    # Issue 8: synchronous completion is reflected in the response.
+    body = resp.json()
+    assert body["processing"] is False
+    assert body["message"] == "Audio uploaded and transcribed."
+
+    # Read the persisted words and verify chunk-2 timestamps were offset by 30s.
+    words_path = os.path.join(temp_projects_dir, project_uuid, ".conduit", "words.json")
+    with open(words_path, "r", encoding="utf-8") as f:
+        words = json.load(f)["words"]
+    assert len(words) == 4
+    assert words[0]["start"] == 0.0 and words[1]["end"] == 1.5      # chunk 1 unchanged
+    assert words[2]["start"] == 30.0 and words[2]["end"] == 30.5    # chunk 2 + 30s offset
+    assert words[3]["start"] == 31.0 and words[3]["end"] == 31.5
+    # No rewind: chunk-2 first word starts at/after chunk-1 last word's end.
+    assert words[2]["start"] >= words[1]["end"]
+
+
+@pytest.mark.asyncio
+async def test_global_exception_handler_returns_detail():
+    """Issue 7: the global 500 handler returns {"detail": ...} (not {"error": ...})."""
+    from main import global_exception_handler
+
+    resp = await global_exception_handler(None, Exception("boom"))
+    assert resp.status_code == 500
+    payload = json.loads(resp.body)
+    assert "detail" in payload
+    assert "error" not in payload

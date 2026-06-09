@@ -1,19 +1,21 @@
 """FFmpeg video generation service for the Conduit project."""
 
 import asyncio
-import datetime
 import json
 import os
 import shutil
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from fastapi import HTTPException
 from config import PROJECTS_BASE_DIR
 import services.effects as effects
 
-FFMPEG_PATH = r"D:\Program Files\PROTEUS\INSTALL\Tools\Python\ffmpeg.exe"
+# ffmpeg binary location. Defaults to "ffmpeg" (resolved via PATH); override
+# with the CONDUIT_FFMPEG_PATH env var (e.g. in .env) if ffmpeg is not on PATH.
+FFMPEG_PATH = os.environ.get("CONDUIT_FFMPEG_PATH", "ffmpeg")
 
 
 def _run_ffmpeg(cmd: List[str], log_file: str | None = None) -> None:
@@ -197,15 +199,11 @@ def burn_captions(
     _run_ffmpeg(cmd, log_file)
 
 
-# Keep a reference to avoid shadowing by the generate_video parameter.
-_burn_captions_impl = burn_captions
-
-
 async def generate_video(
     project_dir: str,
     segments: List[Dict[str, Any]],
     voiceover_path: str,
-    burn_captions: bool = False,
+    should_burn_captions: bool = False,
 ) -> str:
     """Orchestrate the full video generation pipeline.
 
@@ -219,6 +217,11 @@ async def generate_video(
       7. Clean up temp files.
 
     Returns the path to the final output video.
+
+    Note: this renders the whole pipeline synchronously and is awaited inline by
+    the /video/generate endpoint (the request is held until the render finishes).
+    This is a deliberate decision for Conduit's single-user localhost model — see
+    the H13 rationale in main.py. Progress is polled separately via /video/status.
     """
     log_file = os.path.join(project_dir, ".conduit", "ffmpeg.log")
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
@@ -270,12 +273,12 @@ async def generate_video(
         )
 
         final_path = mixed_path
-        if burn_captions:
+        if should_burn_captions:
             srt_path = os.path.join(project_dir, "captions.srt")
             if os.path.exists(srt_path):
                 captioned_path = os.path.join(temp_dir, "captioned.mp4")
                 await asyncio.to_thread(
-                    _burn_captions_impl,
+                    burn_captions,
                     mixed_path,
                     srt_path,
                     captioned_path,

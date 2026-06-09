@@ -1,6 +1,6 @@
 import os
 import tempfile
-from typing import List
+from typing import List, Tuple
 from pydub import AudioSegment
 from pydub.silence import detect_nonsilent
 
@@ -13,8 +13,14 @@ def estimate_wav_size(audio_segment: AudioSegment) -> int:
     return int(bytes_per_second * duration_seconds) + 44
 
 
-def chunk_audio(file_path: str, max_bytes: int = 25_000_000) -> List[str]:
-    """Split audio on silence boundaries, each chunk <= max_bytes."""
+def chunk_audio(file_path: str, max_bytes: int = 25_000_000) -> List[Tuple[str, float]]:
+    """Split audio on silence boundaries, each chunk <= max_bytes.
+
+    Returns a list of (chunk_path, start_offset_seconds) tuples, where
+    start_offset_seconds is the chunk's start position in the ORIGINAL audio.
+    Callers must add the offset to each transcribed word's start/end so
+    timestamps stay on the absolute timeline. Single-chunk paths use offset 0.0.
+    """
     audio = AudioSegment.from_file(file_path)
 
     # If the whole audio is already under the limit, return as single chunk
@@ -22,7 +28,7 @@ def chunk_audio(file_path: str, max_bytes: int = 25_000_000) -> List[str]:
         temp_dir = tempfile.mkdtemp()
         chunk_path = os.path.join(temp_dir, "chunk_000.wav")
         audio.export(chunk_path, format="wav")
-        return [chunk_path]
+        return [(chunk_path, 0.0)]
 
     # Detect non-silent segments with >= 300ms silence between them
     nonsilent_ranges = detect_nonsilent(audio, min_silence_len=300, silence_thresh=-40)
@@ -33,7 +39,7 @@ def chunk_audio(file_path: str, max_bytes: int = 25_000_000) -> List[str]:
         temp_dir = tempfile.mkdtemp()
         chunk_path = os.path.join(temp_dir, "chunk_000.wav")
         audio.export(chunk_path, format="wav")
-        return [chunk_path]
+        return [(chunk_path, 0.0)]
 
     temp_dir = tempfile.mkdtemp()
     chunk_paths = []
@@ -49,7 +55,7 @@ def chunk_audio(file_path: str, max_bytes: int = 25_000_000) -> List[str]:
             # Export current chunk
             chunk_path = os.path.join(temp_dir, f"chunk_{len(chunk_paths):03d}.wav")
             audio[current_chunk_start:current_chunk_end].export(chunk_path, format="wav")
-            chunk_paths.append(chunk_path)
+            chunk_paths.append((chunk_path, current_chunk_start / 1000.0))
 
             # Start new chunk
             current_chunk_start = start
@@ -61,6 +67,6 @@ def chunk_audio(file_path: str, max_bytes: int = 25_000_000) -> List[str]:
     # Export the final chunk
     chunk_path = os.path.join(temp_dir, f"chunk_{len(chunk_paths):03d}.wav")
     audio[current_chunk_start:current_chunk_end].export(chunk_path, format="wav")
-    chunk_paths.append(chunk_path)
+    chunk_paths.append((chunk_path, current_chunk_start / 1000.0))
 
     return chunk_paths

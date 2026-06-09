@@ -257,11 +257,19 @@ async def upload_voiceover(project_uuid: str, file: UploadFile = File(...)):
     # Transcription pipeline
     file_size = os.path.getsize(voiceover_path)
     if file_size > 25_000_000:
-        chunk_paths = chunk_audio(voiceover_path)
+        # chunk_audio returns (path, start_offset_seconds) tuples. Whisper
+        # timestamps are chunk-relative, so add each chunk's original-audio
+        # offset to keep word start/end on the absolute timeline.
+        chunks = chunk_audio(voiceover_path)
         all_words = []
-        for chunk_path in chunk_paths:
+        for chunk_path, offset in chunks:
             result = await transcribe_audio(chunk_path)
-            all_words.extend(result.get("words", []))
+            for word in result.get("words", []):
+                if word.get("start") is not None:
+                    word["start"] = word["start"] + offset
+                if word.get("end") is not None:
+                    word["end"] = word["end"] + offset
+                all_words.append(word)
         words = all_words
     else:
         result = await transcribe_audio(voiceover_path)
@@ -288,9 +296,10 @@ async def upload_voiceover(project_uuid: str, file: UploadFile = File(...)):
 
     await update_state(project_uuid, ProjectState.STEP_1_COMPLETE)
 
+    # Transcription runs synchronously above, so it is already complete here.
     return {
-        "processing": True,
-        "message": "Audio uploaded. Transcription in progress.",
+        "processing": False,
+        "message": "Audio uploaded and transcribed.",
     }
 
 

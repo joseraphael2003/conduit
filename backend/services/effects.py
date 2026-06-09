@@ -77,8 +77,8 @@ def build_zoompan_filter(effect_name: str, duration: float, fps: int = 24) -> st
 def random_assign_effects(segments: list) -> List[Tuple[int, str]]:
     """Randomly assign an effect to each segment.
 
-    No two adjacent segments are guaranteed to have the same effect.
-    Uses a simple random pick for each segment.
+    Uses a simple independent random pick (non-"none") for each segment;
+    adjacent segments may receive the same effect (no adjacency guard).
 
     Args:
         segments: List of segment objects.

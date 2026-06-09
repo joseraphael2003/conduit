@@ -1461,3 +1461,51 @@ async def test_generate_prompts_max_tokens_16000(async_client, cleanup_projects,
         assert all(
             json.loads(c.request.content)["max_tokens"] == 16000 for c in route.calls
         )
+
+
+@pytest.mark.asyncio
+async def test_get_characters_preserves_prompt_fields(async_client, cleanup_projects, created_project):
+    """Issue 3: GET /characters must return persisted front_profile_prompt /
+    turnaround_prompt (not strip them via response_model)."""
+    project_uuid = created_project["uuid"]
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    characters_path = os.path.join(project_dir, "characters.json")
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump({"characters": [{
+            "name": "Alice",
+            "type": "speaking",
+            "importance": "major",
+            "description": "A brave knight.",
+            "base_name": "Alice",
+            "version_label": "default",
+            "version_index": 0,
+            "front_profile_prompt": "Front profile of Alice.",
+            "turnaround_prompt": "360 view of Alice.",
+        }]}, f)
+
+    resp = await async_client.get(f"/api/v1/projects/{project_uuid}/characters")
+    assert resp.status_code == 200, f"got {resp.status_code}: {resp.text}"
+    char = resp.json()["characters"][0]
+    assert char["front_profile_prompt"] == "Front profile of Alice."
+    assert char["turnaround_prompt"] == "360 view of Alice."
+
+
+@pytest.mark.asyncio
+async def test_get_characters_legacy_backfills_base_name(async_client, cleanup_projects, created_project):
+    """Issue 3 back-compat: a legacy characters.json with no base_name/prompts
+    still returns 200 with base_name backfilled from name."""
+    project_uuid = created_project["uuid"]
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    characters_path = os.path.join(project_dir, "characters.json")
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump({"characters": [{
+            "name": "Bob",
+            "type": "creature",
+            "importance": "minor",
+            "description": "A thief.",
+        }]}, f)
+
+    resp = await async_client.get(f"/api/v1/projects/{project_uuid}/characters")
+    assert resp.status_code == 200, f"got {resp.status_code}: {resp.text}"
+    char = resp.json()["characters"][0]
+    assert char["base_name"] == "Bob"

@@ -127,7 +127,7 @@ class MockFireworksClient:
 fireworks_module.FireworksClient = MockFireworksClient
 
 
-async def mock_generate_video(project_dir, segments, voiceover_path, burn_captions=False):
+async def mock_generate_video(project_dir, segments, voiceover_path, should_burn_captions=False):
     """Create fake output.mp4 and captions.srt without running FFmpeg."""
     output_dir = os.path.join(project_dir, "output")
     os.makedirs(output_dir, exist_ok=True)
