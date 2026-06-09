@@ -1246,3 +1246,218 @@ async def test_call2_with_pre_version_characters(async_client, cleanup_projects,
     assert char["version_label"] == "default"
     assert char["base_name"] == "Alice"
     assert char["version_index"] == 0
+
+
+@pytest.mark.asyncio
+async def test_extract_characters_max_tokens_16000(async_client, cleanup_projects, created_project):
+    """POST characters/extract sends max_tokens=16000 to Fireworks (truncation guard)."""
+    project_uuid = created_project["uuid"]
+    step1_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    assert step1_resp.status_code == 200
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    with open(os.path.join(conduit_dir, "source_of_truth_script.txt"), "w", encoding="utf-8") as f:
+        f.write("Alice is a brave knight.")
+
+    with respx.mock:
+        route = respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {
+                                        "characters": [
+                                            {
+                                                "name": "Alice",
+                                                "type": "speaking",
+                                                "importance": "major",
+                                                "description": "A brave knight.",
+                                            }
+                                        ]
+                                    }
+                                ),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/characters/extract")
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+
+        request = route.calls.last.request
+        body = json.loads(request.content)
+        assert body["max_tokens"] == 16000
+
+
+@pytest.mark.asyncio
+async def test_timeline_max_tokens_16000(async_client, cleanup_projects, created_project):
+    """POST characters/timeline sends max_tokens=16000 to Fireworks (truncation guard).
+
+    The timeline endpoint requires BOTH characters.json AND source_of_truth_script.txt
+    (else 400 'No script found' before the AI call), so both are written here.
+    """
+    project_uuid = created_project["uuid"]
+    step1_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    assert step1_resp.status_code == 200
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    with open(os.path.join(conduit_dir, "source_of_truth_script.txt"), "w", encoding="utf-8") as f:
+        f.write("Alice is a brave knight who grows old over the years.")
+
+    characters_path = os.path.join(project_dir, "characters.json")
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "characters": [
+                    {
+                        "name": "Alice",
+                        "type": "speaking",
+                        "importance": "major",
+                        "description": "A brave knight.",
+                        "base_name": "Alice",
+                        "version_label": "default",
+                        "version_index": 0,
+                        "identity_anchor": "Silver-armored knight with blue eyes",
+                    }
+                ]
+            },
+            f,
+        )
+
+    with respx.mock:
+        route = respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {
+                                        "characters": [
+                                            {
+                                                "name": "Alice (Young)",
+                                                "type": "speaking",
+                                                "importance": "major",
+                                                "description": "A brave young knight.",
+                                                "base_name": "Alice",
+                                                "version_label": "Young",
+                                                "version_index": 0,
+                                                "identity_anchor": "Silver-armored knight with blue eyes",
+                                                "appears_from": "00:00",
+                                            },
+                                            {
+                                                "name": "Alice (Old)",
+                                                "type": "speaking",
+                                                "importance": "major",
+                                                "description": "A brave old knight.",
+                                                "base_name": "Alice",
+                                                "version_label": "Old",
+                                                "version_index": 1,
+                                                "identity_anchor": "Silver-armored knight with blue eyes",
+                                                "appears_from": "05:00",
+                                            },
+                                        ]
+                                    }
+                                ),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/characters/timeline")
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+
+        request = route.calls.last.request
+        body = json.loads(request.content)
+        assert body["max_tokens"] == 16000
+
+
+@pytest.mark.asyncio
+async def test_generate_prompts_max_tokens_16000(async_client, cleanup_projects, created_project):
+    """POST characters/prompts sends max_tokens=16000 on BOTH Call-2 requests (front + turnaround)."""
+    project_uuid = created_project["uuid"]
+    step1_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    assert step1_resp.status_code == 200
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    characters_path = os.path.join(project_dir, "characters.json")
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "characters": [
+                    {
+                        "name": "Alice",
+                        "type": "speaking",
+                        "importance": "major",
+                        "description": "A brave knight with silver armor.",
+                    }
+                ]
+            },
+            f,
+        )
+
+    call_count = 0
+
+    def side_effect(request):
+        nonlocal call_count
+        call_count += 1
+        field = "front_profile_prompt" if call_count == 1 else "turnaround_prompt"
+        return httpx.Response(
+            200,
+            json={
+                "id": "test-id",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(
+                                {"characters": [{"name": "Alice", field: "A prompt for Alice."}]}
+                            ),
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    with respx.mock:
+        route = respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            side_effect=side_effect
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/characters/prompts")
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+
+        # Call 2 fires exactly two requests (front + turnaround); both must be budgeted at 16000.
+        assert route.call_count == 2
+        assert all(
+            json.loads(c.request.content)["max_tokens"] == 16000 for c in route.calls
+        )

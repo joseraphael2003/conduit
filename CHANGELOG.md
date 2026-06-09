@@ -5,6 +5,14 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] — 2026-06-09 — Character Prompt Truncation Fix
+
+### Fixed
+- **Step 2 "Generate Prompts" 502 on truncation — character AI calls were under-budgeted at 2048 tokens** (`backend/routers/characters.py`) — All four `chat_completion` calls (Call 1 extraction, timeline version detection, and Call 2 front-profile + turnaround prompts) omitted `max_tokens` and fell back to the 2048 default. For projects with a versioned/large cast, the turnaround prompt JSON exceeded 2048 tokens and truncated mid-string (`Unterminated string ... char 8823/9598`), which the 0.8.1 JSON guard correctly surfaced as a clean 502. Introduced `CHARACTER_PROMPTS_MAX_TOKENS = 16000` and applied it to all four calls, mirroring the `BREAKDOWN_MAX_TOKENS` (0.8.1) and `SEGMENT_PROMPTS_MAX_TOKENS` (0.8.3) fixes in `segments.py`. Unlike the segment passes, character prompt generation has no overlapping-batch fallback, so the token-budget bump is the sole remedy. `DEFAULT_MAX_TOKENS` (2048) in `fireworks.py`, the JSON guard, and `_handle_fireworks_error` are unchanged.
+
+### Testing
+- 199 backend tests passed (0 failures); `tsc --noEmit` → 0 errors. Added 3 regression tests asserting `max_tokens=16000` on the extract, timeline, and both Call-2 (front + turnaround) requests.
+
 ## [0.8.3] — 2026-06-08 — Stable Segment IDs + Step 3 Fixes
 
 ### Fixed
@@ -884,12 +892,13 @@ frontend/components.json
 | **v0.8.1** | 181 | 73* | 254 |
 | **v0.8.2** | 183 | 73* | 256 |
 | **v0.8.3** | 196 | 73* | 269 |
+| **v0.8.4** | 199 | 73* | 272 |
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.8.3 — 196 tests)
+### Backend Test Breakdown (v0.8.4 — 199 tests)
 - `test_fireworks.py` — 10 tests (client, base_url, retry logic, json_schema, error handling, invalid-JSON guard)
-- `test_characters.py` — 22 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2)
+- `test_characters.py` — 25 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2, extract/timeline/Call-2 max_tokens=16000)
 - `test_character_timeline.py` — 6 tests (happy path, 409 no-characters, 502 duplicate name, 502 missing person, 502 inconsistent anchor, single version default)
 - `test_segments.py` — 42 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502, split preserves other segment fields, merge preserves other segment fields, segment_id lifecycle: breakdown/split/merge/update preserve or backfill UUIDs, Pass 2 truncation fix: max_tokens 16000, truncation triggers overlapping-batch fallback, bad JSON without truncation does not fallback)
 - `test_images.py` — 18 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status, image-by-id resolution, lazy migration: stamps missing segment_ids and renames legacy `images/{index:04d}.png` files, migration idempotent)

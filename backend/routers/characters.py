@@ -32,6 +32,10 @@ import routers.projects as _projects_module
 
 characters_router = APIRouter()
 
+# Mirrors segments.py BREAKDOWN/SEGMENT_PROMPTS_MAX_TOKENS; covers extract,
+# timeline, and Call 2 prompt generation to prevent mid-JSON truncation 502s.
+CHARACTER_PROMPTS_MAX_TOKENS = 16000
+
 
 def _handle_fireworks_error(exc: Exception) -> None:
     """Map Fireworks/OpenAI exceptions to HTTPExceptions."""
@@ -100,6 +104,7 @@ async def extract_characters(project_uuid: str):
         result = await client.chat_completion(
             messages=messages,
             json_schema=CharacterList,
+            max_tokens=CHARACTER_PROMPTS_MAX_TOKENS,
         )
     except (AuthenticationError, RateLimitError, APIError) as exc:
         _handle_fireworks_error(exc)
@@ -207,6 +212,7 @@ async def generate_character_timeline(project_uuid: str):
         result = await client.chat_completion(
             messages=messages,
             json_schema=CharacterList,
+            max_tokens=CHARACTER_PROMPTS_MAX_TOKENS,
         )
     except (AuthenticationError, RateLimitError, APIError) as exc:
         _handle_fireworks_error(exc)
@@ -355,10 +361,12 @@ async def generate_prompts(project_uuid: str):
         front_result = await client.chat_completion(
             messages=front_messages,
             json_schema=FrontProfilePromptList,
+            max_tokens=CHARACTER_PROMPTS_MAX_TOKENS,
         )
         turnaround_result = await client.chat_completion(
             messages=turnaround_messages,
             json_schema=TurnaroundPromptList,
+            max_tokens=CHARACTER_PROMPTS_MAX_TOKENS,
         )
     except (AuthenticationError, RateLimitError, APIError) as exc:
         _handle_fireworks_error(exc)
