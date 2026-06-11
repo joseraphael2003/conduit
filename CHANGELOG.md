@@ -5,6 +5,14 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.8] — 2026-06-11 — AI Timeout Sizing + 504 Mapping
+
+### Fixed
+- **AI client timeout is now env-configurable** (`FIREWORKS_TIMEOUT`, default 300s) — umans is materially slower than Fireworks and was tripping the old hardcoded 120s cap; `max_retries=0` stops the SDK from severing a slow-but-progressing request at the timeout and retrying; the redundant 60s/120s stack is unified to one configurable value (+ small asyncio safety buffer); AI timeouts now return a clean **504** (was an unhandled 500) across all Fireworks-backed endpoints.
+
+### Testing
+- 218 backend tests passed (0 failures); `tsc --noEmit` → 0 errors. Added 2 `test_fireworks.py` tests (timeout env override + timeout normalization) and 1 `test_characters.py` test (504 on timeout).
+
 ## [0.8.7] — 2026-06-11 — Prompt JSON-Contract + Step 4 Hardening
 
 ### Fixed
@@ -942,15 +950,16 @@ frontend/components.json
 | **v0.8.2** | 183 | 73* | 256 |
 | **v0.8.3** | 196 | 73* | 269 |
 | **v0.8.4** | 199 | 73* | 272 |
+| **v0.8.8** | 218 | 73* | 291 |
 | **v0.8.7** | 215 | 73* | 288 |
 | **v0.8.6** | 208 | 73* | 281 |
 | **v0.8.5** | 207 | 73* | 280 |
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.8.7 — 215 tests)
-- `test_fireworks.py` — 11 tests (client, base_url, retry logic, json_schema, error handling, invalid-JSON guard, model env override)
-- `test_characters.py` — 27 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2, extract/timeline/Call-2 max_tokens=16000, GET preserves prompt fields, GET legacy base_name backfill)
+### Backend Test Breakdown (v0.8.8 — 218 tests)
+- `test_fireworks.py` — 13 tests (client, base_url, retry logic, json_schema, error handling, invalid-JSON guard, model env override, timeout env override, timeout normalization)
+- `test_characters.py` — 28 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2, extract/timeline/Call-2 max_tokens=16000, GET preserves prompt fields, GET legacy base_name backfill, 504 on timeout)
 - `test_character_timeline.py` — 6 tests (happy path, 409 no-characters, 502 duplicate name, 502 missing person, 502 inconsistent anchor, single version default)
 - `test_segments.py` — 43 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502, split preserves other segment fields, merge preserves other segment fields, segment_id lifecycle: breakdown/split/merge/update preserve or backfill UUIDs, Pass 2 truncation fix: max_tokens 16000, truncation triggers overlapping-batch fallback, bad JSON without truncation does not fallback, missing segment_index resilience)
 - `test_images.py` — 18 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status, image-by-id resolution, lazy migration: stamps missing segment_ids and renames legacy `images/{index:04d}.png` files, migration idempotent)

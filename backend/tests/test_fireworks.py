@@ -369,3 +369,35 @@ async def test_fireworks_model_env_override(monkeypatch):
     client = FireworksClient(api_key="test-key")
     assert client.model == DEFAULT_MODEL
 
+
+@pytest.mark.asyncio
+async def test_fireworks_timeout_env_override(monkeypatch):
+    """FIREWORKS_TIMEOUT env var is respected, falling back to DEFAULT_TIMEOUT."""
+    # Import locally so test failure is obvious if module structure changes.
+    from services.fireworks import DEFAULT_TIMEOUT
+
+    # Case 1: env var is set
+    monkeypatch.setenv("FIREWORKS_TIMEOUT", "200")
+    client = FireworksClient(api_key="test-key")
+    assert client.timeout == 200.0
+
+    # Case 2: env var is unset
+    monkeypatch.delenv("FIREWORKS_TIMEOUT", raising=False)
+    client = FireworksClient(api_key="test-key")
+    assert client.timeout == DEFAULT_TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_fireworks_chat_completion_timeout_normalization(fireworks_client):
+    """A read timeout from the SDK is normalized to APITimeoutError."""
+    from openai._exceptions import APITimeoutError
+
+    with respx.mock:
+        route = respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            side_effect=httpx.ReadTimeout("Request timed out")
+        )
+        with pytest.raises(APITimeoutError):
+            await fireworks_client.chat_completion(
+                messages=[{"role": "user", "content": "Timeout test"}],
+            )
+

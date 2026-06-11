@@ -6,7 +6,7 @@ _uuid_module = uuid
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Body, HTTPException, status
-from openai._exceptions import AuthenticationError, RateLimitError, APIError
+from openai._exceptions import AuthenticationError, APITimeoutError, RateLimitError, APIError
 
 from models.segments import (
     SegmentBreakdown,
@@ -46,6 +46,12 @@ def _handle_fireworks_error(exc: Exception) -> None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="AI service rate limited, retry shortly",
+        ) from exc
+    if isinstance(exc, APITimeoutError):
+        logging.error("AI request timed out", exc_info=exc)
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="AI provider timed out — try again or increase FIREWORKS_TIMEOUT",
         ) from exc
     if isinstance(exc, APIError):
         logging.error("AI request failed", exc_info=exc)

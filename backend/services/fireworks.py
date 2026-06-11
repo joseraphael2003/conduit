@@ -5,13 +5,14 @@ from typing import Any, Dict, List, Optional, Type, Union
 
 import httpx
 from openai import OpenAI
-from openai._exceptions import APIError, AuthenticationError, RateLimitError
+from openai._exceptions import APIError, APITimeoutError, AuthenticationError, RateLimitError
 from pydantic import BaseModel
 
 
 DEFAULT_MAX_TOKENS = 2048
 DEFAULT_MODEL = "accounts/fireworks/routers/kimi-k2p6-turbo"
 DEFAULT_BASE_URL = "https://api.fireworks.ai/inference/v1"
+DEFAULT_TIMEOUT = 300.0
 
 
 class FireworksClient:
@@ -32,6 +33,7 @@ class FireworksClient:
             "FIREWORKS_BASE_URL", DEFAULT_BASE_URL
         )
         self.model = model or os.environ.get("FIREWORKS_MODEL", DEFAULT_MODEL)
+        self.timeout = float(os.environ.get("FIREWORKS_TIMEOUT", DEFAULT_TIMEOUT))
         self._client: Optional[OpenAI] = None
 
     def _get_client(self) -> OpenAI:
@@ -39,7 +41,8 @@ class FireworksClient:
             self._client = OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
-                timeout=60.0,
+                timeout=self.timeout,
+                max_retries=0,
             )
         return self._client
 
@@ -100,7 +103,7 @@ class FireworksClient:
                 def _call():
                     return self._get_client().chat.completions.create(**kwargs)
 
-                async with asyncio.timeout(120):
+                async with asyncio.timeout(self.timeout + 15):
                     response = await asyncio.to_thread(_call)
                 content = response.choices[0].message.content
 
@@ -129,6 +132,10 @@ class FireworksClient:
                 else:
                     # Other API errors: raise immediately
                     raise
+            except (asyncio.TimeoutError, TimeoutError) as exc:
+                raise APITimeoutError(
+                    request=httpx.Request("POST", f"{self.base_url}/chat/completions")
+                ) from exc
             except Exception as exc:
                 # Non-API errors: raise immediately
                 raise

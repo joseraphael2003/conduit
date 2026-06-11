@@ -161,6 +161,30 @@ async def test_extract_characters_fireworks_failure(async_client, cleanup_projec
 
 
 @pytest.mark.asyncio
+async def test_extract_characters_timeout_returns_504(async_client, cleanup_projects, created_project):
+    """Fireworks API timeout returns 504 (not 500/502)."""
+    project_uuid = created_project["uuid"]
+    step1_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    assert step1_resp.status_code == 200
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    script_path = os.path.join(conduit_dir, "source_of_truth_script.txt")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write("Some script content")
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            side_effect=httpx.ReadTimeout("Request timed out")
+        )
+        response = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/characters/extract"
+        )
+        assert response.status_code == 504
+        assert "AI provider timed out" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_extract_characters_authentication_error(async_client, cleanup_projects, created_project):
     """Fireworks API authentication error returns 502."""
     project_uuid = created_project["uuid"]
