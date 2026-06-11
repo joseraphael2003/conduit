@@ -352,3 +352,20 @@ async def test_fireworks_chat_completion_invalid_json_guard(fireworks_client):
                 json_schema=FlatResponse,
             )
 
+
+@pytest.mark.asyncio
+async def test_fireworks_model_env_override(monkeypatch):
+    """FIREWORKS_MODEL env var is respected, falling back to DEFAULT_MODEL."""
+    # Import locally so test failure is obvious if module structure changes.
+    from services.fireworks import DEFAULT_MODEL
+
+    # Case 1: env var is set
+    monkeypatch.setenv("FIREWORKS_MODEL", "umans-coder")
+    client = FireworksClient(api_key="test-key")
+    assert client.model == "umans-coder"
+
+    # Case 2: env var is unset
+    monkeypatch.delenv("FIREWORKS_MODEL", raising=False)
+    client = FireworksClient(api_key="test-key")
+    assert client.model == DEFAULT_MODEL
+

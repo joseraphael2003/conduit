@@ -14,7 +14,11 @@ interface Segment {
   end_time: number;
 }
 
-export function Step4Images() {
+interface Step4ImagesProps {
+  onStateChange?: () => void;
+}
+
+export function Step4Images({ onStateChange }: Step4ImagesProps) {
   const { uuid } = useParams<{ uuid: string }>();
   const [segments, setSegments] = useState<Segment[]>([]);
   const [imageStatuses, setImageStatuses] = useState<Record<number, boolean>>({});
@@ -45,11 +49,11 @@ export function Step4Images() {
   }, [uuid]);
 
   const fetchImageStatuses = useCallback(async (signal?: AbortSignal) => {
-    if (!uuid) return;
+    if (!uuid) return {};
     const response = await fetch(`${apiBase}/projects/${uuid}/images/status`, { signal });
     if (response.status === 404) {
       setImageStatuses({});
-      return;
+      return {};
     }
     if (!response.ok) {
       throw new Error(`Failed to fetch image statuses: ${response.status}`);
@@ -60,6 +64,7 @@ export function Step4Images() {
       statuses[Number(key)] = value;
     }
     setImageStatuses(statuses);
+    return statuses;
   }, [uuid]);
 
   useEffect(() => {
@@ -107,7 +112,12 @@ export function Step4Images() {
       if (!response.ok) {
         throw new Error(`Upload failed: ${response.status}`);
       }
-      await fetchImageStatuses();
+      const statuses = await fetchImageStatuses();
+      const allUploaded = segments.length > 0 && segments.every((s) => statuses?.[s.segment_index]);
+      if (allUploaded) {
+        await fetch(`${apiBase}/projects/${uuid}/step/4`, { method: "PUT" });
+        onStateChange?.();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {

@@ -13,6 +13,10 @@ import models.database
 # Now import app
 from main import app
 
+# Clear any real env overrides AFTER dotenv has loaded, so tests use Fireworks defaults
+os.environ.pop("FIREWORKS_BASE_URL", None)
+os.environ.pop("FIREWORKS_MODEL", None)
+
 # Centralized test isolation: single source of truth for all base-dir modules
 from tests.isolation_modules import PATCHED_MODULES
 import routers.projects as projects_module

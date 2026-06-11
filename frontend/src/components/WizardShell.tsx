@@ -74,22 +74,24 @@ export function WizardShell({ children }: WizardShellProps) {
     }
   }, [stepNumber]);
 
+  const refreshProjectState = useCallback(async (signal?: AbortSignal) => {
+    if (!uuid) return;
+    try {
+      const response = await fetch(`${apiBase}/projects/${uuid}/state`, { signal });
+      if (!response.ok) return;
+      const data = (await response.json()) as ProjectState;
+      setProjectState(data);
+    } catch {
+      // silent fail on initial load
+    }
+  }, [uuid]);
+
   useEffect(() => {
     if (!uuid) return;
     const controller = new AbortController();
-    const fetchProjectState = async (signal: AbortSignal) => {
-      try {
-        const response = await fetch(`${apiBase}/projects/${uuid}/state`, { signal });
-        if (!response.ok) return;
-        const data = (await response.json()) as ProjectState;
-        setProjectState(data);
-      } catch {
-        // silent fail on initial load
-      }
-    };
-    fetchProjectState(controller.signal);
+    refreshProjectState(controller.signal);
     return () => controller.abort();
-  }, [uuid]);
+  }, [uuid, currentStep, refreshProjectState]);
 
   useEffect(() => {
     if (!uuid) return;
@@ -150,11 +152,11 @@ export function WizardShell({ children }: WizardShellProps) {
       case 1:
         return <Step1Script onStep1Ready={handleStep1Ready} />;
       case 2:
-        return <Step2Characters />;
+        return <Step2Characters onStateChange={refreshProjectState} />;
       case 3:
-        return <Step3Segments />;
+        return <Step3Segments onStateChange={refreshProjectState} />;
       case 4:
-        return <Step4Images />;
+        return <Step4Images onStateChange={refreshProjectState} />;
       case 5:
         return <Step5Video />;
       default:

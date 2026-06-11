@@ -37,7 +37,11 @@ interface Segment {
   characters_present: string[];
 }
 
-export function Step3Segments() {
+interface Step3SegmentsProps {
+  onStateChange?: () => void;
+}
+
+export function Step3Segments({ onStateChange }: Step3SegmentsProps) {
   const { uuid } = useParams<{ uuid: string }>();
   const [segments, setSegments] = useState<Segment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -150,6 +154,7 @@ export function Step3Segments() {
       const data = await response.json();
       setSegments(data.segments || []);
       setPromptsGenerated(true);
+      onStateChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error during prompt generation");
     } finally {

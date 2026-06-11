@@ -60,7 +60,11 @@ function isSingleDefaultVersion(group: Character[]): boolean {
   return group.length === 1 && group[0].version_label === "default";
 }
 
-export function Step2Characters() {
+interface Step2CharactersProps {
+  onStateChange?: () => void;
+}
+
+export function Step2Characters({ onStateChange }: Step2CharactersProps) {
   const { uuid } = useParams<{ uuid: string }>();
   const [characters, setCharacters] = useState<Character[]>([]);
   const [extracting, setExtracting] = useState(false);
@@ -284,6 +288,7 @@ export function Step2Characters() {
       }
       const data = (await response.json()) as ApiResponse;
       setCharacters(data.characters ?? []);
+      onStateChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {

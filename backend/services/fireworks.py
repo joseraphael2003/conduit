@@ -15,7 +15,11 @@ DEFAULT_BASE_URL = "https://api.fireworks.ai/inference/v1"
 
 
 class FireworksClient:
-    """Async wrapper around the Fireworks AI OpenAI-compatible API."""
+    """Async wrapper around the Fireworks AI OpenAI-compatible API.
+
+    Provider-agnostic: any OpenAI-compatible endpoint via FIREWORKS_BASE_URL
+    and FIREWORKS_MODEL env vars.
+    """
 
     def __init__(
         self,
@@ -27,7 +31,7 @@ class FireworksClient:
         self.base_url = base_url or os.environ.get(
             "FIREWORKS_BASE_URL", DEFAULT_BASE_URL
         )
-        self.model = model or DEFAULT_MODEL
+        self.model = model or os.environ.get("FIREWORKS_MODEL", DEFAULT_MODEL)
         self._client: Optional[OpenAI] = None
 
     def _get_client(self) -> OpenAI:

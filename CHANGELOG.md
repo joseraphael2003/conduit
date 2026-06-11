@@ -5,6 +5,20 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.6] — 2026-06-11 — umans Provider + Step 2–4 Next Refresh
+
+### Changed
+- **AI provider is now fully env-configurable** (`backend/services/fireworks.py`, `backend/.env.example`) — added `FIREWORKS_MODEL` env override so the model identifier can be swapped per-deployment. Defaults remain the Fireworks Kimi router (`accounts/fireworks/routers/kimi-k2p6-turbo`). To use the umans Code Pro Plan, set `FIREWORKS_BASE_URL=https://api.code.umans.ai/v1`, `FIREWORKS_MODEL=umans-coder`, and `FIREWORKS_API_KEY=<umans key>`. Whisper transcription stays on OpenAI (`OPENAI_API_KEY`) unchanged.
+
+### Fixed
+- **"Next" button now enables immediately after Steps 2–4 complete** (`frontend/src/components/WizardShell.tsx`, `frontend/src/pages/Step{2,3,4}.tsx`) — `WizardShell` now exposes `refreshProjectState()` and passes it to Steps 2/3/4 as an optional `onStateChange` callback. On successful state-advancing POSTs (Step 2 prompts, Step 3 prompts), the callback refreshes `projectState` so `canGoNext` evaluates to `true` without a page reload. Step 4 additionally calls `PUT /step/4` once the final image is uploaded, advancing `step_3_complete → step_4_complete` so Step 5 generation is reachable. A step-change refetch is also added as a safety net.
+
+### Security Note
+- The AI key lives only in `.env` (gitignored). If it was shared, rotate it.
+
+### Testing
+- 208 backend tests passed (0 failures); `tsc --noEmit` → 0 errors. Added 1 regression test asserting `FIREWORKS_MODEL` env override (set/unset).
+
 ## [0.8.5] — 2026-06-10 — Hardening (Code-Review Fixes)
 
 ### Fixed
@@ -912,12 +926,13 @@ frontend/components.json
 | **v0.8.2** | 183 | 73* | 256 |
 | **v0.8.3** | 196 | 73* | 269 |
 | **v0.8.4** | 199 | 73* | 272 |
+| **v0.8.6** | 208 | 73* | 281 |
 | **v0.8.5** | 207 | 73* | 280 |
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.8.5 — 207 tests)
-- `test_fireworks.py` — 10 tests (client, base_url, retry logic, json_schema, error handling, invalid-JSON guard)
+### Backend Test Breakdown (v0.8.6 — 208 tests)
+- `test_fireworks.py` — 11 tests (client, base_url, retry logic, json_schema, error handling, invalid-JSON guard, model env override)
 - `test_characters.py` — 27 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2, extract/timeline/Call-2 max_tokens=16000, GET preserves prompt fields, GET legacy base_name backfill)
 - `test_character_timeline.py` — 6 tests (happy path, 409 no-characters, 502 duplicate name, 502 missing person, 502 inconsistent anchor, single version default)
 - `test_segments.py` — 42 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502, split preserves other segment fields, merge preserves other segment fields, segment_id lifecycle: breakdown/split/merge/update preserve or backfill UUIDs, Pass 2 truncation fix: max_tokens 16000, truncation triggers overlapping-batch fallback, bad JSON without truncation does not fallback)
