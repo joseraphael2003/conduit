@@ -489,7 +489,7 @@ async def generate_segment_prompts(uuid: str):
             _handle_fireworks_error(exc)
 
     # Build a map of segment_index -> result
-    result_map = {seg["segment_index"]: seg for seg in result}
+    result_map = {seg["segment_index"]: seg for seg in result if isinstance(seg, dict) and "segment_index" in seg}
 
     # Update original segments with prompts
     updated_segments = []

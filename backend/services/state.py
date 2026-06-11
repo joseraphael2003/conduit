@@ -146,7 +146,11 @@ def _delete_downstream_files(project_dir: str, edited_step: int) -> None:
         if os.path.exists(segments_path):
             os.remove(segments_path)
 
-    # Always preserve images/ and .conduit/ directories
+    # Step 4/5: delete output video if invalidating at or through step 4
+    if edited_step <= 4:
+        output_video = os.path.join(project_dir, "output", "output.mp4")
+        if os.path.exists(output_video):
+            os.remove(output_video)
 
 
 def _clear_sub_step_state(data: dict, edited_step: int) -> dict:
@@ -197,6 +201,9 @@ async def invalidate_downstream(uuid: str, edited_step: int) -> ProjectState:
         data["state"] = new_state.value
         data["updated_at"] = datetime.now(timezone.utc).isoformat()
         data = _clear_sub_step_state(data, edited_step)
+        if edited_step <= 4:
+            data.pop("video_progress", None)
+            data.pop("video_error", None)
         with open(state_json_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 

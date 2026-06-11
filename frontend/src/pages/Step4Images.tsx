@@ -112,12 +112,15 @@ export function Step4Images({ onStateChange }: Step4ImagesProps) {
       if (!response.ok) {
         throw new Error(`Upload failed: ${response.status}`);
       }
-      const statuses = await fetchImageStatuses();
-      const allUploaded = segments.length > 0 && segments.every((s) => statuses?.[s.segment_index]);
-      if (allUploaded) {
-        await fetch(`${apiBase}/projects/${uuid}/step/4`, { method: "PUT" });
-        onStateChange?.();
-      }
+        const statuses = await fetchImageStatuses();
+        const allUploaded = segments.length > 0 && segments.every((s) => statuses?.[s.segment_index]);
+        if (allUploaded) {
+          const stepResp = await fetch(`${apiBase}/projects/${uuid}/step/4`, { method: "PUT" });
+          if (!stepResp.ok) {
+            console.warn(`PUT /step/4 failed: ${stepResp.status}`);
+          }
+          onStateChange?.();
+        }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {

@@ -100,7 +100,8 @@ def build_character_extraction_messages(script: str) -> list[dict]:
         '"minor" if they appear once or are background.\n'
         "- description: a detailed visual description of the character's appearance, clothing, and expression. "
         "If the script does not describe them in detail, infer a visually interesting design that fits the narrative. "
-        "Do NOT leave fields blank."
+        "Do NOT leave fields blank.\n\n"
+        'Return ONLY a JSON object with a top-level "characters" array. Each element of "characters" is an object with fields: name, type, importance, description.'
     )
     user = f"<script>\n{script}\n</script>"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -177,7 +178,8 @@ def build_front_profile_messages(characters: object, style: StyleProfile) -> lis
         "- If identity_anchor is present, it describes stable facial / anatomical traits that MUST stay consistent "
         "across every version of this character. Preserve these traits in the generated prompt.\n"
         "- If version_label and appears_from are present, the prompt must reflect this specific life-stage only.\n"
-        "- Do NOT mix traits from different versions into the same prompt."
+        "- Do NOT mix traits from different versions into the same prompt.\n\n"
+        'Return ONLY a JSON object with a top-level "characters" array; each element has fields: name, front_profile_prompt.'
     )
     user = f"<characters>\n{_to_json_str(characters)}\n</characters>"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -221,7 +223,8 @@ def build_turnaround_messages(characters: object, style: StyleProfile) -> list[d
         "- If identity_anchor is present, it describes stable facial / anatomical traits that MUST stay consistent "
         "across every version of this character. Preserve these traits in the generated prompt.\n"
         "- If version_label and appears_from are present, the prompt must reflect this specific life-stage only.\n"
-        "- Do NOT mix traits from different versions into the same prompt."
+        "- Do NOT mix traits from different versions into the same prompt.\n\n"
+        'Return ONLY a JSON object with a top-level "characters" array; each element has fields: name, turnaround_prompt.'
     )
     user = f"<characters>\n{_to_json_str(characters)}\n</characters>"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -241,7 +244,7 @@ def build_segment_breakdown_messages(script: str, words: str) -> list[dict]:
         "6. A pause of ≥1.5 seconds in the voiceover should start a new segment.\n"
         "7. Each segment must have a start_time and end_time based on the word timestamps.\n"
         "8. Aim for segment durations of 3–10 seconds. Avoid segments shorter than 2 seconds unless necessary.\n\n"
-        "Output a JSON array of segments with:\n"
+        'Output a JSON object with a top-level "segments" array, where each element has:\n'
         "- segment_index: int\n"
         "- script_line: the text for this segment\n"
         "- start_time: float (seconds)\n"
@@ -271,7 +274,8 @@ def build_segment_prompts_messages(
         "- segment_index: int\n"
         "- script_line: str\n"
         "- segment_prompt: str\n"
-        '- characters_present: List[str] (e.g., ["@Alice", "@Bob"])\n\n'
+        '- characters_present: List[str] (e.g., ["@Alice", "@Bob"])\n'
+        "Every output item MUST include segment_index — this field is required for correct downstream matching.\n\n"
         "## Rules for segment_prompt\n\n"
         "1. **Opening style anchor:** Every prompt must start with style descriptors that match the video's visual identity.\n"
         f'   - Example: "{style.segment_scene_anchor}"\n\n'

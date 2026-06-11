@@ -642,3 +642,57 @@ async def test_global_exception_handler_returns_detail():
     payload = json.loads(resp.body)
     assert "detail" in payload
     assert "error" not in payload
+
+
+@pytest.mark.asyncio
+async def test_invalidate_downstream_step_4_clears_video_state_and_output(async_client, cleanup_projects, temp_projects_dir):
+    """Invalidate from Step 4 (or at step 5) clears video_progress, video_error, and output.mp4."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Video Cleanup"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    # Advance all the way to step_5_complete
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/3")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/4")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/5")
+
+    # Stage video state and output file
+    state_module.set_sub_step_state(project_uuid, "video_progress", 100)
+    state_module.set_sub_step_state(project_uuid, "video_error", "some error")
+
+    project_dir = os.path.join(temp_projects_dir, project_uuid)
+    output_dir = os.path.join(project_dir, "output")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "output.mp4")
+    with open(output_path, "wb") as f:
+        f.write(b"fake_video")
+
+    # Also stage segments.json and images (should be preserved)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+    segments_path = os.path.join(conduit_dir, "segments.json")
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump({"segments": []}, f)
+    images_dir = os.path.join(project_dir, "images")
+    os.makedirs(images_dir, exist_ok=True)
+    image_path = os.path.join(images_dir, "0001.png")
+    with open(image_path, "wb") as f:
+        f.write(b"fake_image")
+
+    # Invalidate from Step 4
+    result = await state_module.invalidate_downstream(project_uuid, 4)
+    assert result.value == "step_3_complete"
+
+    # Video file deleted
+    assert not os.path.exists(output_path)
+    # Segments and images preserved
+    assert os.path.exists(segments_path)
+    assert os.path.exists(image_path)
+
+    # video_progress and video_error cleared from state.json
+    state_json_path = os.path.join(conduit_dir, "state.json")
+    with open(state_json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert "video_progress" not in data
+    assert "video_error" not in data

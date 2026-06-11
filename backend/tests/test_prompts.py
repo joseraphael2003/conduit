@@ -353,3 +353,49 @@ def test_anime_only_in_profile_values():
             assert styles_start <= i <= styles_end, (
                 f"Lowercase 'anime' found outside profile values at line {i}: {line.strip()!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# JSON-contract pinning (0.8.7)
+# ---------------------------------------------------------------------------
+
+def test_character_extraction_system_pinned_json_key():
+    messages = build_character_extraction_messages("Alice is brave.")
+    system = messages[0]["content"]
+    assert '"characters"' in system
+    assert "Return ONLY a JSON object" in system
+
+
+def test_segment_breakdown_system_pinned_json_key():
+    messages = build_segment_breakdown_messages("Script text.", '[{"word":"test"}]')
+    system = messages[0]["content"]
+    assert '"segments"' in system
+    assert "Return ONLY the JSON object" in system
+
+
+def test_front_profile_system_pinned_json_key():
+    style = STYLES["secret_level"]
+    characters = [{"name": "Alice", "description": "Brave knight."}]
+    messages = build_front_profile_messages(characters, style)
+    system = messages[0]["content"]
+    assert '"characters"' in system
+    assert "front_profile_prompt" in system
+
+
+def test_turnaround_system_pinned_json_key():
+    style = STYLES["secret_level"]
+    characters = [{"name": "Alice", "description": "Brave knight."}]
+    messages = build_turnaround_messages(characters, style)
+    system = messages[0]["content"]
+    assert '"characters"' in system
+    assert "turnaround_prompt" in system
+
+
+def test_segment_prompts_system_contains_segment_index_mandate():
+    style = STYLES["secret_level"]
+    segments = [{"segment_index": 1, "script_line": "Alice walks."}]
+    characters = [{"name": "Alice", "description": "Brave knight."}]
+    messages = build_segment_prompts_messages(segments, characters, style)
+    system = messages[0]["content"]
+    assert "MUST include segment_index" in system
+    assert '"segments"' in system

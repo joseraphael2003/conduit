@@ -5,6 +5,22 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.7] — 2026-06-11 — Prompt JSON-Contract + Step 4 Hardening
+
+### Fixed
+- **AI prompts now pin their JSON output shape in prose** (`backend/services/prompts.py`) — umans-coder (and potentially other non-Fireworks providers) ignores the `response_format.schema` hint and returns free-form JSON. All four at-risk builders now explicitly state the top-level key in text:
+  - **Extraction** — `Return ONLY a JSON object with a top-level "characters" array` (was primed with "entities", causing `{"entities":...}` → 502).
+  - **Breakdown** — `Output a JSON object with a top-level "segments" array` (was ambiguous "JSON array of segments").
+  - **Front profile** — `Return ONLY a JSON object with a top-level "characters" array; each element has fields: name, front_profile_prompt`.
+  - **Turnaround** — same pattern with `turnaround_prompt`.
+  - **Pass-2 (segment prompts)** — already had the `"segments"` wrapper; added `Every output item MUST include segment_index` emphasis since Pass-2 result-map matching keys on that field.
+- **Pass-2 tolerates missing `segment_index`** (`backend/routers/segments.py`) — defensive comprehension skips items without `segment_index` instead of raising an unhandled `KeyError` → 500. Segments absent from the map keep empty `segment_prompt`/`characters_present`.
+- **Step 4 PUT response is now checked** (`frontend/src/pages/Step4Images.tsx`) — captures the `PUT /step/4` response; warns on non-ok but still refreshes state. Prevents silent assumption of success when prerequisites are unmet.
+- **Invalidation clears stale video state and output file** (`backend/services/state.py`) — when a project is invalidated at/through Step 4, `video_progress` and `video_error` are dropped from `state.json` and `output/output.mp4` is deleted if present. Previously, re-uploading images at `step_5_complete` left the old video reporting "completed".
+
+### Testing
+- 215 backend tests passed (0 failures); `tsc --noEmit` → 0 errors. Added 5 prompt-contract assertions + 1 invalidation video-cleanup test + 1 Pass-2 missing-segment-index resilience test.
+
 ## [0.8.6] — 2026-06-11 — umans Provider + Step 2–4 Next Refresh
 
 ### Changed
@@ -926,20 +942,21 @@ frontend/components.json
 | **v0.8.2** | 183 | 73* | 256 |
 | **v0.8.3** | 196 | 73* | 269 |
 | **v0.8.4** | 199 | 73* | 272 |
+| **v0.8.7** | 215 | 73* | 288 |
 | **v0.8.6** | 208 | 73* | 281 |
 | **v0.8.5** | 207 | 73* | 280 |
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.8.6 — 208 tests)
+### Backend Test Breakdown (v0.8.7 — 215 tests)
 - `test_fireworks.py` — 11 tests (client, base_url, retry logic, json_schema, error handling, invalid-JSON guard, model env override)
 - `test_characters.py` — 27 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2, extract/timeline/Call-2 max_tokens=16000, GET preserves prompt fields, GET legacy base_name backfill)
 - `test_character_timeline.py` — 6 tests (happy path, 409 no-characters, 502 duplicate name, 502 missing person, 502 inconsistent anchor, single version default)
-- `test_segments.py` — 42 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502, split preserves other segment fields, merge preserves other segment fields, segment_id lifecycle: breakdown/split/merge/update preserve or backfill UUIDs, Pass 2 truncation fix: max_tokens 16000, truncation triggers overlapping-batch fallback, bad JSON without truncation does not fallback)
+- `test_segments.py` — 43 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502, split preserves other segment fields, merge preserves other segment fields, segment_id lifecycle: breakdown/split/merge/update preserve or backfill UUIDs, Pass 2 truncation fix: max_tokens 16000, truncation triggers overlapping-batch fallback, bad JSON without truncation does not fallback, missing segment_index resilience)
 - `test_images.py` — 18 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status, image-by-id resolution, lazy migration: stamps missing segment_ids and renames legacy `images/{index:04d}.png` files, migration idempotent)
-- `test_projects.py` — 19 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript, voiceover re-upload, invalidate_downstream, delete atomicity, chunked-transcription offsets, global 500 error shape)
+- `test_projects.py` — 20 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript, voiceover re-upload, invalidate_downstream, delete atomicity, chunked-transcription offsets, global 500 error shape, invalidate clears video state/output)
 - `test_video.py` — 51 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters, _write_progress timestamp, status .conduit segment count, FFMPEG_PATH env, .wav voiceover resolution)
-- `test_prompts.py` — 29 tests (StyleProfile injection, 5 builders' anchors/rules, SHOT_TYPES, get_style fallback, Pass 2 no-placeholder assertion)
+- `test_prompts.py` — 34 tests (StyleProfile injection, 5 builders' anchors/rules, SHOT_TYPES, get_style fallback, Pass 2 no-placeholder assertion, prompt-contract JSON-key pinning: extraction/breakdown/front/turnaround/Pass-2)
 - `test_schema_flatten.py` — 2 tests (enum survives `_flatten_schema`, Pydantic rejects bad enum)
 - `test_style_state.py` — 2 tests (style_id persisted on create, `get_style_id` default fallback)
 - `test_isolation.py` — 1 test (meta-test: no unpatched PROJECTS_BASE_DIR modules)

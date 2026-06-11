@@ -2300,6 +2300,143 @@ async def test_generate_prompts_truncation_triggers_fallback(async_client, clean
 
 
 @pytest.mark.asyncio
+async def test_generate_prompts_missing_segment_index_resilience(async_client, cleanup_projects, temp_projects_dir):
+    """POST prompts returns 200 when Fireworks omits segment_index for one item.
+
+    Segments with a matching segment_index get their prompt fields populated.
+    The segment whose index was omitted retains empty/default prompt fields.
+    """
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Missing Segment Index"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+    segments = {
+        "segments": [
+            {
+                "segment_index": 0,
+                "script_line": "Hello world.",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "duration": 1.0,
+            },
+            {
+                "segment_index": 1,
+                "script_line": "This is a test.",
+                "start_time": 1.1,
+                "end_time": 2.5,
+                "duration": 1.4,
+            },
+            {
+                "segment_index": 2,
+                "script_line": "Final line here.",
+                "start_time": 2.6,
+                "end_time": 3.5,
+                "duration": 0.9,
+            },
+        ]
+    }
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    characters = {
+        "characters": [
+            {"name": "Alice", "type": "speaking", "importance": "major", "description": "A curious girl"}
+        ]
+    }
+    with open(os.path.join(temp_projects_dir, project_uuid, "characters.json"), "w", encoding="utf-8") as f:
+        json.dump(characters, f)
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "segments": [
+                                        {
+                                            "segment_index": 0,
+                                            "script_line": "Hello world.",
+                                            "segment_prompt": "Alice waves hello.",
+                                            "characters_present": ["Alice"],
+                                            "start_time": 0.0,
+                                            "end_time": 1.0,
+                                            "duration": 1.0,
+                                        },
+                                        {
+                                            "segment_index": 2,
+                                            "script_line": "Final line here.",
+                                            "segment_prompt": "Alice sits down.",
+                                            "characters_present": ["Alice"],
+                                            "start_time": 2.6,
+                                            "end_time": 3.5,
+                                            "duration": 0.9,
+                                        },
+                                        # Intentionally missing segment_index for segment 1
+                                        {
+                                            "script_line": "This is a test.",
+                                            "segment_prompt": "Alice writes a test.",
+                                            "characters_present": ["Alice"],
+                                            "start_time": 1.1,
+                                            "end_time": 2.5,
+                                            "duration": 1.4,
+                                        },
+                                    ]
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/prompts")
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        data = resp.json()
+        assert "segments" in data
+        assert len(data["segments"]) == 3
+
+        # Segments 0 and 2 should have populated prompts
+        assert data["segments"][0]["segment_prompt"] == "Alice waves hello."
+        assert data["segments"][0]["characters_present"] == ["Alice"]
+        assert data["segments"][2]["segment_prompt"] == "Alice sits down."
+        assert data["segments"][2]["characters_present"] == ["Alice"]
+
+        # Segment 1 (missing segment_index in response) should retain empty defaults
+        assert data["segments"][1]["segment_prompt"] == ""
+        assert data["segments"][1]["characters_present"] == []
+
+    # Verify persistence in segments.json
+    with open(os.path.join(conduit_dir, "segments.json"), "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert saved["segments"][0]["segment_prompt"] == "Alice waves hello."
+    assert saved["segments"][0]["characters_present"] == ["Alice"]
+    assert saved["segments"][2]["segment_prompt"] == "Alice sits down."
+    assert saved["segments"][2]["characters_present"] == ["Alice"]
+    assert saved["segments"][1]["segment_prompt"] == ""
+    assert saved["segments"][1]["characters_present"] == []
+
+    # Assert state.json updated
+    state_path = os.path.join(conduit_dir, "state.json")
+    with open(state_path, "r", encoding="utf-8") as f:
+        state_data = json.load(f)
+    assert state_data.get("step_3_pass_2_complete") is True
+
+
+@pytest.mark.asyncio
 async def test_generate_prompts_bad_json_no_fallback(async_client, cleanup_projects, temp_projects_dir):
     """POST prompts returns 502 on non-truncation APIError without fallback."""
     create_resp = await async_client.post("/api/v1/projects", json={"name": "Bad JSON No Fallback"})
