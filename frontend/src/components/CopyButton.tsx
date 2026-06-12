@@ -8,6 +8,7 @@ interface CopyButtonProps {
   size?: number;
   className?: string;
   disabled?: boolean;
+  title?: string;
 }
 
 export function CopyButton({
@@ -17,6 +18,7 @@ export function CopyButton({
   size = 12,
   className = "",
   disabled = false,
+  title,
 }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
 
@@ -45,6 +47,7 @@ export function CopyButton({
       className={`flex items-center gap-1 text-[#8A8A9A] hover:text-[#E8E8F0] font-body text-xs transition-opacity ${disabled ? "opacity-50 cursor-not-allowed" : ""} ${className}`}
       aria-label={ariaLabel}
       aria-disabled={disabled}
+      title={title}
     >
       {copied ? (
         <Check size={size} weight="regular" />

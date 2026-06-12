@@ -177,6 +177,7 @@ export function Step4Images({ onStateChange }: Step4ImagesProps) {
                   text={segment.segment_prompt}
                   ariaLabel={`Copy prompt for segment ${segment.segment_index}`}
                   disabled={!segment.segment_prompt}
+                  title={!segment.segment_prompt ? "No prompt yet" : undefined}
                 />
               </div>
 
