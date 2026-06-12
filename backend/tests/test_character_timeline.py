@@ -5,6 +5,7 @@ import httpx
 import respx
 import routers.projects as projects_module
 import models.database
+import services.state as state_module
 
 
 async def _advance_to_step_1(async_client, project_uuid: str) -> None:
@@ -568,3 +569,78 @@ async def test_timeline_single_version(async_client, cleanup_projects, created_p
         saved = json.load(f)
     assert len(saved["characters"]) == 1
     assert saved["characters"][0]["version_label"] == "default"
+
+
+@pytest.mark.asyncio
+async def test_timeline_normalized_collision_backfills_all(async_client, cleanup_projects, created_project):
+    """Two characters with same normalized name both get backfilled when AI returns nothing."""
+    project_uuid = created_project["uuid"]
+    await _advance_to_step_1(async_client, project_uuid)
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    characters_path = os.path.join(project_dir, "characters.json")
+    initial = {
+        "characters": [
+            {
+                "name": "Hero",
+                "base_name": "Hero",
+                "type": "speaking",
+                "importance": "major",
+                "description": "A hero",
+            },
+            {
+                "name": "hero",
+                "base_name": "hero",
+                "type": "speaking",
+                "importance": "minor",
+                "description": "A lowercase hero",
+            },
+        ]
+    }
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump(initial, f)
+
+    state_module.set_sub_step_state(project_uuid, "step_2_call_1_complete", True)
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {
+                                        "characters": []
+                                    }
+                                ),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+        response = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/characters/timeline"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["characters"]) == 2
+        for char in data["characters"]:
+            assert char["version_label"] == "default"
+            assert char["version_index"] == 0
+
+    with open(characters_path, "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert len(saved["characters"]) == 2
+    for char in saved["characters"]:
+        assert char["version_label"] == "default"
+        assert char["version_index"] == 0
