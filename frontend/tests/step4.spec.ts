@@ -167,4 +167,9 @@ test.describe('Step 4 Images Page', () => {
     await expect(thumbnails).toHaveCount(2);
     await page.screenshot({ path: 'test-results/step4-upload.png' });
   });
+
+  test('each segment cell has Copy Prompt button', async ({ page }) => {
+    const copyButtons = page.locator('button[aria-label^="Copy prompt for segment"]');
+    await expect(copyButtons).toHaveCount(mockSegments.length);
+  });
 });

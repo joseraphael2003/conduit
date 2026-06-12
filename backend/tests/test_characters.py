@@ -1694,6 +1694,7 @@ async def test_extract_invalidates_downstream(async_client, cleanup_projects, cr
     with open(state_path, "r", encoding="utf-8") as f:
         state_data = json.load(f)
     state_data["step_2_call_2_complete"] = True
+    state_data["step_2_timeline_complete"] = True
     state_data["step_3_pass_1_complete"] = True
     state_data["step_3_pass_2_complete"] = True
     state_data["step_4_images_uploaded"] = True
@@ -1754,6 +1755,7 @@ async def test_extract_invalidates_downstream(async_client, cleanup_projects, cr
     with open(state_path, "r", encoding="utf-8") as f:
         state_data = json.load(f)
     assert state_data.get("step_2_call_2_complete") is None
+    assert state_data.get("step_2_timeline_complete") is None
     assert state_data.get("step_3_pass_1_complete") is None
     assert state_data.get("step_3_pass_2_complete") is None
     assert state_data.get("step_4_images_uploaded") is None
@@ -1802,6 +1804,7 @@ async def test_timeline_invalidates_downstream(async_client, cleanup_projects, c
     with open(state_path, "r", encoding="utf-8") as f:
         state_data = json.load(f)
     state_data["step_2_call_2_complete"] = True
+    state_data["step_2_timeline_complete"] = True
     state_data["step_3_pass_1_complete"] = True
     state_data["step_3_pass_2_complete"] = True
     state_data["step_4_images_uploaded"] = True
@@ -1865,6 +1868,8 @@ async def test_timeline_invalidates_downstream(async_client, cleanup_projects, c
     with open(state_path, "r", encoding="utf-8") as f:
         state_data = json.load(f)
     assert state_data.get("step_2_call_2_complete") is None
+    # Timeline endpoint re-establishes its own state after invalidation
+    assert state_data.get("step_2_timeline_complete") is True
     assert state_data.get("step_3_pass_1_complete") is None
     assert state_data.get("step_3_pass_2_complete") is None
     assert state_data.get("step_4_images_uploaded") is None

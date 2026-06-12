@@ -332,8 +332,82 @@ async def test_timeline_missing_person_backfilled(async_client, cleanup_projects
 
 
 @pytest.mark.asyncio
+async def test_timeline_drifted_base_name_not_doubled(async_client, cleanup_projects, created_project):
+    """Drifted base_name via normalization does NOT trigger backfill → exactly 1 character."""
+    project_uuid = created_project["uuid"]
+    await _advance_to_step_1(async_client, project_uuid)
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    characters_path = os.path.join(project_dir, "characters.json")
+    initial = {
+        "characters": [
+            {
+                "name": "Hero",
+                "type": "speaking",
+                "importance": "major",
+                "description": "A brave hero.",
+                "base_name": "Hero",
+            }
+        ]
+    }
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump(initial, f)
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {
+                                        "characters": [
+                                            {
+                                                "name": "Hero",
+                                                "type": "speaking",
+                                                "importance": "major",
+                                                "description": "A brave hero.",
+                                                "base_name": "hero",  # lowercase drift
+                                                "version_label": "default",
+                                                "version_index": 0,
+                                                "identity_anchor": "Strong jawline",
+                                            }
+                                        ]
+                                    }
+                                ),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+        response = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/characters/timeline"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["characters"]) == 1  # NOT 2 from backfill
+        assert data["characters"][0]["base_name"] == "hero"
+
+    # Assert characters.json updated with the drifted base_name
+    with open(characters_path, "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert len(saved["characters"]) == 1
+    assert saved["characters"][0]["base_name"] == "hero"
+
+
+@pytest.mark.asyncio
 async def test_timeline_inconsistent_anchor_coalesced(async_client, cleanup_projects, created_project):
-    """Inconsistent identity_anchor per base_name is coalesced → 200 with shared anchor."""
+    """Empty anchor coalesced to non-empty anchor → 200 with shared non-empty anchor."""
     project_uuid = created_project["uuid"]
     await _advance_to_step_1(async_client, project_uuid)
 
@@ -377,7 +451,7 @@ async def test_timeline_inconsistent_anchor_coalesced(async_client, cleanup_proj
                                                 "description": "Young Alice.",
                                                 "base_name": "Alice",
                                                 "version_label": "Young",
-                                                "identity_anchor": "Silver-armored knight",
+                                                "identity_anchor": "",
                                             },
                                             {
                                                 "name": "Alice (Old)",
@@ -386,7 +460,7 @@ async def test_timeline_inconsistent_anchor_coalesced(async_client, cleanup_proj
                                                 "description": "Old Alice.",
                                                 "base_name": "Alice",
                                                 "version_label": "Old",
-                                                "identity_anchor": "Golden-armored knight",
+                                                "identity_anchor": "Silver-armored knight",
                                             },
                                         ]
                                     }
@@ -404,17 +478,16 @@ async def test_timeline_inconsistent_anchor_coalesced(async_client, cleanup_proj
         assert response.status_code == 200
         data = response.json()
         assert len(data["characters"]) == 2
-        # Both versions share the first encountered anchor
-        anchors = {c["identity_anchor"] for c in data["characters"]}
-        assert len(anchors) == 1
-        assert "Silver-armored knight" in anchors
+        # All versions end up with the non-empty anchor from version 1
+        for char in data["characters"]:
+            assert char["identity_anchor"] == "Silver-armored knight"
 
     # Assert characters.json updated with coalesced anchor
     with open(characters_path, "r", encoding="utf-8") as f:
         saved = json.load(f)
     assert len(saved["characters"]) == 2
-    saved_anchors = {c["identity_anchor"] for c in saved["characters"]}
-    assert len(saved_anchors) == 1
+    for char in saved["characters"]:
+        assert char["identity_anchor"] == "Silver-armored knight"
 
 
 @pytest.mark.asyncio
