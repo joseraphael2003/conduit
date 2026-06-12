@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from models.characters import (
     CharacterList,
+    CharacterDescription,
     CharacterPromptsList,
     FrontProfilePromptList,
     TurnaroundPromptList,
@@ -64,6 +65,17 @@ def _handle_fireworks_error(exc: Exception) -> None:
             detail="AI request failed",
         ) from exc
     raise exc
+
+
+def _normalize_name(name: str) -> str:
+    """Normalize character name for resilient matching.
+    
+    Preserves parenthetical distinctions (e.g. 'The Mother (impostor)'
+    stays distinct from 'The Real Mother').
+    """
+    if not name:
+        return ""
+    return " ".join(name.lower().split())
 
 
 @characters_router.post(
@@ -138,6 +150,9 @@ async def extract_characters(project_uuid: str):
     characters_path = os.path.join(project_dir, "characters.json")
     with open(characters_path, "w", encoding="utf-8") as f:
         json.dump(validated.model_dump(), f, indent=2)
+
+    # Invalidate downstream before marking this sub-step complete
+    await invalidate_downstream(project_uuid, 2)
 
     # Update sub-step state in state.json
     state_json_path = os.path.join(project_dir, ".conduit", "state.json")
@@ -238,47 +253,59 @@ async def generate_character_timeline(project_uuid: str):
         if not char.base_name:
             char.base_name = char.name
 
-    # Guard: every entry name must be unique
-    names = [char.name for char in validated.characters]
-    if len(names) != len(set(names)):
-        logging.error("Character timeline contains duplicate names")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Character timeline contains duplicate names",
-        )
+    # Guard: every entry name must be unique → disambiguate
+    seen_names = set()
+    for char in validated.characters:
+        if char.name in seen_names:
+            logging.warning("Disambiguating duplicate character name: %s", char.name)
+            char.name = f"{char.name} ({char.version_index})"
+        seen_names.add(char.name)
 
-    # Guard: every original base_name/person must yield at least one version
-    original_base_names = set()
+    # Guard: every original base_name/person must yield at least one version → backfill
+    original_base_names = {}
     for char in characters:
         base = char.get("base_name", "") or char.get("name", "")
-        original_base_names.add(base)
+        original_base_names.setdefault(base, []).append(char)
 
     result_base_names = set(char.base_name for char in validated.characters)
-    missing = original_base_names - result_base_names
-    if missing:
-        logging.error("Character timeline missing versions for: %s", missing)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Character timeline missing versions for some characters",
+    missing = set(original_base_names.keys()) - result_base_names
+    for base_name in missing:
+        logging.warning(
+            "Timeline missing versions for base_name %s; backfilling from Call 1",
+            base_name,
         )
+        template = original_base_names[base_name][0]
+        backfill = CharacterDescription(
+            name=template.get("name", base_name),
+            type=template.get("type", "speaking"),
+            importance=template.get("importance", "minor"),
+            description=template.get("description", ""),
+            base_name=base_name,
+            version_label="default",
+            version_index=0,
+            appears_from="",
+            identity_anchor="",
+        )
+        validated.characters.append(backfill)
 
-    # Guard: identity_anchor must be consistent per base_name
+    # Guard: identity_anchor must be consistent per base_name → coalesce
     anchor_by_base = {}
     for char in validated.characters:
         if char.base_name not in anchor_by_base:
             anchor_by_base[char.base_name] = char.identity_anchor
         elif anchor_by_base[char.base_name] != char.identity_anchor:
-            logging.error(
-                "Inconsistent identity_anchor for base_name %s", char.base_name
+            logging.warning(
+                "Coalescing inconsistent identity_anchor for base_name %s",
+                char.base_name,
             )
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Inconsistent identity_anchor across versions",
-            )
+            char.identity_anchor = anchor_by_base[char.base_name]
 
     # Persist expanded list
     with open(characters_path, "w", encoding="utf-8") as f:
         json.dump(validated.model_dump(), f, indent=2)
+
+    # Invalidate downstream before marking timeline complete
+    await invalidate_downstream(project_uuid, 2)
 
     # Update sub-step state
     set_sub_step_state(project_uuid, "step_2_timeline_complete", True)
@@ -388,23 +415,56 @@ async def generate_prompts(project_uuid: str):
     except (AuthenticationError, RateLimitError, APIError) as exc:
         _handle_fireworks_error(exc)
 
-    # Merge by name — guard against omission/mismatch
-    front_by_name = {
-        c.get("name"): c for c in front_result.get("characters", [])
-    }
-    turnaround_by_name = {
-        c.get("name"): c for c in turnaround_result.get("characters", [])
-    }
+    # Merge by normalized name — positional fallback if counts match
+    front_chars = front_result.get("characters", [])
+    turnaround_chars = turnaround_result.get("characters", [])
 
-    for char in characters:
+    front_by_name = {}
+    for c in front_chars:
+        norm = _normalize_name(c.get("name", ""))
+        if norm in front_by_name:
+            logging.warning("Duplicate normalized front-profile name %r", norm)
+        front_by_name[norm] = c
+
+    turnaround_by_name = {}
+    for c in turnaround_chars:
+        norm = _normalize_name(c.get("name", ""))
+        if norm in turnaround_by_name:
+            logging.warning("Duplicate normalized turnaround name %r", norm)
+        turnaround_by_name[norm] = c
+
+    counts_match = (
+        len(front_chars) == len(characters) == len(turnaround_chars)
+    )
+
+    for idx, char in enumerate(characters):
         name = char.get("name")
-        front = front_by_name.get(name)
-        turnaround = turnaround_by_name.get(name)
+        norm = _normalize_name(name)
+        front = front_by_name.get(norm)
+        turnaround = turnaround_by_name.get(norm)
+
         if not front or not turnaround:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="AI returned incomplete character prompts",
-            )
+            if counts_match:
+                logging.warning(
+                    "Prompts merge: name %r not found by normalized match, "
+                    "using positional fallback at index %d",
+                    name, idx,
+                )
+                if not front:
+                    front = front_chars[idx]
+                if not turnaround:
+                    turnaround = turnaround_chars[idx]
+            else:
+                logging.error(
+                    "Prompts merge: name %r missing and counts don't match "
+                    "(front=%d, turnaround=%d, expected=%d)",
+                    name, len(front_chars), len(turnaround_chars), len(characters),
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="AI returned incomplete character prompts",
+                )
+
         char["front_profile_prompt"] = front.get("front_profile_prompt", "")
         char["turnaround_prompt"] = turnaround.get("turnaround_prompt", "")
 

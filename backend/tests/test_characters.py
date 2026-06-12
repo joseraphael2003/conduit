@@ -1533,3 +1533,355 @@ async def test_get_characters_legacy_backfills_base_name(async_client, cleanup_p
     assert resp.status_code == 200, f"got {resp.status_code}: {resp.text}"
     char = resp.json()["characters"][0]
     assert char["base_name"] == "Bob"
+
+
+@pytest.mark.asyncio
+async def test_generate_prompts_name_drift_resolved(async_client, cleanup_projects, created_project):
+    """AI returns same count but drifted names → 200 via normalized match or positional fallback."""
+    project_uuid = created_project["uuid"]
+    step1_resp = await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    assert step1_resp.status_code == 200
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    characters_path = os.path.join(project_dir, "characters.json")
+    initial_characters = {
+        "characters": [
+            {
+                "name": "Alice",
+                "type": "speaking",
+                "importance": "major",
+                "description": "A brave knight.",
+            },
+            {
+                "name": "Bob",
+                "type": "creature",
+                "importance": "minor",
+                "description": "A cunning thief.",
+            },
+        ]
+    }
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump(initial_characters, f)
+
+    call_count = 0
+
+    def side_effect(request):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # Front profile for both characters
+            return httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {
+                                        "characters": [
+                                            {
+                                                "name": "Alice",
+                                                "front_profile_prompt": "Front profile of Alice.",
+                                            },
+                                            {
+                                                "name": "Bob",
+                                                "front_profile_prompt": "Front profile of Bob.",
+                                            },
+                                        ]
+                                    }
+                                ),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        else:
+            # Turnaround returns drifted names (extra spaces, punctuation)
+            return httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {
+                                        "characters": [
+                                            {
+                                                "name": "alice",  # lowercase drift
+                                                "turnaround_prompt": "360 view of Alice.",
+                                            },
+                                            {
+                                                "name": " BOB ",  # spaces drift
+                                                "turnaround_prompt": "360 view of Bob.",
+                                            },
+                                        ]
+                                    }
+                                ),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            side_effect=side_effect
+        )
+        response = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/characters/prompts"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["characters"]) == 2
+        # Both prompts merged despite name drift
+        for char in data["characters"]:
+            assert "front_profile_prompt" in char
+            assert "turnaround_prompt" in char
+
+    # Assert characters.json updated with prompts
+    with open(characters_path, "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert saved["characters"][0]["front_profile_prompt"] == "Front profile of Alice."
+    assert saved["characters"][0]["turnaround_prompt"] == "360 view of Alice."
+    assert saved["characters"][1]["front_profile_prompt"] == "Front profile of Bob."
+    assert saved["characters"][1]["turnaround_prompt"] == "360 view of Bob."
+
+
+@pytest.mark.asyncio
+async def test_extract_invalidates_downstream(async_client, cleanup_projects, created_project):
+    """POST extract resets downstream state and deletes segments.json."""
+    project_uuid = created_project["uuid"]
+
+    # Advance to step_3_complete
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/3")
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+
+    # Write script
+    script_path = os.path.join(conduit_dir, "source_of_truth_script.txt")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write("Alice is a brave knight.")
+
+    # Create segments.json (downstream artifact)
+    segments_path = os.path.join(conduit_dir, "segments.json")
+    segments = {
+        "segments": [
+            {"segment_index": 0, "script_line": "Hello", "start_time": 0.0, "end_time": 1.0, "duration": 1.0}
+        ]
+    }
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    # Set downstream sub-step states
+    state_path = os.path.join(conduit_dir, "state.json")
+    with open(state_path, "r", encoding="utf-8") as f:
+        state_data = json.load(f)
+    state_data["step_2_call_2_complete"] = True
+    state_data["step_3_pass_1_complete"] = True
+    state_data["step_3_pass_2_complete"] = True
+    state_data["step_4_images_uploaded"] = True
+    with open(state_path, "w", encoding="utf-8") as f:
+        json.dump(state_data, f)
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {
+                                        "characters": [
+                                            {
+                                                "name": "Alice",
+                                                "type": "speaking",
+                                                "importance": "major",
+                                                "description": "A brave knight.",
+                                            }
+                                        ]
+                                    }
+                                ),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+        response = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/characters/extract"
+        )
+        assert response.status_code == 200
+
+    # Assert DB state reset to step_1_complete
+    db = await models.database.get_db()
+    try:
+        cursor = await db.execute("SELECT state FROM projects WHERE uuid = ?", (project_uuid,))
+        row = await cursor.fetchone()
+    finally:
+        await db.close()
+    assert row[0] == "step_1_complete"
+
+    # Assert segments.json deleted
+    assert not os.path.exists(segments_path)
+
+    # Assert downstream sub-steps cleared
+    with open(state_path, "r", encoding="utf-8") as f:
+        state_data = json.load(f)
+    assert state_data.get("step_2_call_2_complete") is None
+    assert state_data.get("step_3_pass_1_complete") is None
+    assert state_data.get("step_3_pass_2_complete") is None
+    assert state_data.get("step_4_images_uploaded") is None
+
+
+@pytest.mark.asyncio
+async def test_timeline_invalidates_downstream(async_client, cleanup_projects, created_project):
+    """POST timeline resets downstream state and deletes segments.json."""
+    project_uuid = created_project["uuid"]
+
+    # Advance to step_3_complete
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/3")
+
+    project_dir = os.path.join(projects_module.PROJECTS_BASE_DIR, project_uuid)
+    conduit_dir = os.path.join(project_dir, ".conduit")
+
+    # Write script
+    script_path = os.path.join(conduit_dir, "source_of_truth_script.txt")
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write("Alice is a brave knight.")
+
+    # Create characters.json with base_name for timeline prerequisite
+    characters_path = os.path.join(project_dir, "characters.json")
+    characters = {
+        "characters": [
+            {"name": "Alice", "type": "speaking", "importance": "major", "description": "A brave knight.", "base_name": "Alice"}
+        ]
+    }
+    with open(characters_path, "w", encoding="utf-8") as f:
+        json.dump(characters, f)
+
+    # Create segments.json (downstream artifact)
+    segments_path = os.path.join(conduit_dir, "segments.json")
+    segments = {
+        "segments": [
+            {"segment_index": 0, "script_line": "Hello", "start_time": 0.0, "end_time": 1.0, "duration": 1.0}
+        ]
+    }
+    with open(segments_path, "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    # Set downstream sub-step states
+    state_path = os.path.join(conduit_dir, "state.json")
+    with open(state_path, "r", encoding="utf-8") as f:
+        state_data = json.load(f)
+    state_data["step_2_call_2_complete"] = True
+    state_data["step_3_pass_1_complete"] = True
+    state_data["step_3_pass_2_complete"] = True
+    state_data["step_4_images_uploaded"] = True
+    with open(state_path, "w", encoding="utf-8") as f:
+        json.dump(state_data, f)
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {
+                                        "characters": [
+                                            {
+                                                "name": "Alice",
+                                                "type": "speaking",
+                                                "importance": "major",
+                                                "description": "A brave knight.",
+                                                "base_name": "Alice",
+                                                "version_label": "default",
+                                                "identity_anchor": "Silver-armored knight",
+                                            }
+                                        ]
+                                    }
+                                ),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+        response = await async_client.post(
+            f"/api/v1/projects/{project_uuid}/characters/timeline"
+        )
+        assert response.status_code == 200
+
+    # Assert DB state reset to step_1_complete
+    db = await models.database.get_db()
+    try:
+        cursor = await db.execute("SELECT state FROM projects WHERE uuid = ?", (project_uuid,))
+        row = await cursor.fetchone()
+    finally:
+        await db.close()
+    assert row[0] == "step_1_complete"
+
+    # Assert segments.json deleted
+    assert not os.path.exists(segments_path)
+
+    # Assert downstream sub-steps cleared
+    with open(state_path, "r", encoding="utf-8") as f:
+        state_data = json.load(f)
+    assert state_data.get("step_2_call_2_complete") is None
+    assert state_data.get("step_3_pass_1_complete") is None
+    assert state_data.get("step_3_pass_2_complete") is None
+    assert state_data.get("step_4_images_uploaded") is None
+
+
+def test_normalize_name_conservative():
+    """Unit test: _normalize_name preserves parenthetical distinctions and trims whitespace."""
+    from routers.characters import _normalize_name
+
+    assert _normalize_name("Alice") == "alice"
+    assert _normalize_name("  Alice  ") == "alice"
+    assert _normalize_name("ALICE") == "alice"
+    assert _normalize_name("Alice (young)") == "alice (young)"
+    assert _normalize_name("Alice  (young)") == "alice (young)"
+    assert _normalize_name("The Mother (impostor)") == "the mother (impostor)"
+    assert _normalize_name("") == ""
+    assert _normalize_name("  ") == ""
+    assert _normalize_name("Bob the Builder") == "bob the builder"
+    # Parenthetical distinction is preserved
+    assert _normalize_name("The Mother (impostor)") != _normalize_name("The Real Mother")

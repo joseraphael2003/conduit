@@ -158,8 +158,8 @@ async def test_timeline_409_no_characters(async_client, cleanup_projects, create
 
 
 @pytest.mark.asyncio
-async def test_timeline_502_duplicate_name(async_client, cleanup_projects, created_project):
-    """Mock timeline returning duplicate names returns 502."""
+async def test_timeline_duplicate_name_disambiguated(async_client, cleanup_projects, created_project):
+    """Duplicate names are gracefully disambiguated → 200 with unique names."""
     project_uuid = created_project["uuid"]
     await _advance_to_step_1(async_client, project_uuid)
 
@@ -227,18 +227,25 @@ async def test_timeline_502_duplicate_name(async_client, cleanup_projects, creat
         response = await async_client.post(
             f"/api/v1/projects/{project_uuid}/characters/timeline"
         )
-        assert response.status_code == 502
-        assert "Character timeline contains duplicate names" in response.json()["detail"]
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["characters"]) == 2
+        # Second duplicate is disambiguated with version_index suffix
+        names = {c["name"] for c in data["characters"]}
+        assert "Alice (Young)" in names
+        assert any("Alice (Young) (" in n for n in names)
 
-    # Assert characters.json is NOT updated
+    # Assert characters.json IS updated with disambiguated names
     with open(characters_path, "r", encoding="utf-8") as f:
         saved = json.load(f)
-    assert len(saved["characters"]) == 1
+    assert len(saved["characters"]) == 2
+    saved_names = {c["name"] for c in saved["characters"]}
+    assert "Alice (Young)" in saved_names
 
 
 @pytest.mark.asyncio
-async def test_timeline_502_missing_person(async_client, cleanup_projects, created_project):
-    """Mock timeline drops a person → 502."""
+async def test_timeline_missing_person_backfilled(async_client, cleanup_projects, created_project):
+    """Missing persons are gracefully backfilled → 200 with all base_names present."""
     project_uuid = created_project["uuid"]
     await _advance_to_step_1(async_client, project_uuid)
 
@@ -305,19 +312,28 @@ async def test_timeline_502_missing_person(async_client, cleanup_projects, creat
         response = await async_client.post(
             f"/api/v1/projects/{project_uuid}/characters/timeline"
         )
-        assert response.status_code == 502
-        assert "Character timeline missing versions for some characters" in response.json()["detail"]
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["characters"]) == 2
+        base_names = {c["base_name"] for c in data["characters"]}
+        assert "Alice" in base_names
+        assert "Bob" in base_names
+        # Backfilled Bob has default label
+        bob = next(c for c in data["characters"] if c["base_name"] == "Bob")
+        assert bob["version_label"] == "default"
+        assert bob["version_index"] == 0
 
-    # Assert characters.json is preserved
+    # Assert characters.json updated with backfill
     with open(characters_path, "r", encoding="utf-8") as f:
         saved = json.load(f)
     assert len(saved["characters"]) == 2
-    assert saved["characters"][1]["name"] == "Bob"
+    saved_base_names = {c["base_name"] for c in saved["characters"]}
+    assert "Bob" in saved_base_names
 
 
 @pytest.mark.asyncio
-async def test_timeline_502_inconsistent_anchor(async_client, cleanup_projects, created_project):
-    """Mock timeline returns inconsistent identity_anchor per base_name → 502."""
+async def test_timeline_inconsistent_anchor_coalesced(async_client, cleanup_projects, created_project):
+    """Inconsistent identity_anchor per base_name is coalesced → 200 with shared anchor."""
     project_uuid = created_project["uuid"]
     await _advance_to_step_1(async_client, project_uuid)
 
@@ -385,13 +401,20 @@ async def test_timeline_502_inconsistent_anchor(async_client, cleanup_projects, 
         response = await async_client.post(
             f"/api/v1/projects/{project_uuid}/characters/timeline"
         )
-        assert response.status_code == 502
-        assert "Inconsistent identity_anchor across versions" in response.json()["detail"]
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["characters"]) == 2
+        # Both versions share the first encountered anchor
+        anchors = {c["identity_anchor"] for c in data["characters"]}
+        assert len(anchors) == 1
+        assert "Silver-armored knight" in anchors
 
-    # Assert characters.json is preserved
+    # Assert characters.json updated with coalesced anchor
     with open(characters_path, "r", encoding="utf-8") as f:
         saved = json.load(f)
-    assert len(saved["characters"]) == 1
+    assert len(saved["characters"]) == 2
+    saved_anchors = {c["identity_anchor"] for c in saved["characters"]}
+    assert len(saved_anchors) == 1
 
 
 @pytest.mark.asyncio

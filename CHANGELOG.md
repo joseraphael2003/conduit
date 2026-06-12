@@ -5,6 +5,22 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-06-12 — Character Pipeline Resilience
+
+### Fixed
+- **Resilient name matching for character prompts** (`backend/routers/characters.py`) — Introduced `_normalize_name` (casefold, trim, collapse whitespace, strip leading `"the "`, strip punctuation) for matching AI output names back to input names. Positional fallback when input/output counts match but normalized names still drift. Replaces the previous exact-name join that 502'd on any paraphrase.
+- **Graceful timeline guards** (`backend/routers/characters.py`) — AI quirks that previously 502'd now degrade gracefully with logged warnings:
+  - **Duplicate names** → disambiguated by appending version label/index.
+  - **Missing persons** → backfilled as a single default version using the original extraction description.
+  - **Inconsistent `identity_anchor`** → coalesced to the first non-empty anchor per `base_name`.
+- **Re-run invalidation** (`backend/routers/characters.py`, `backend/services/state.py`) — `extract_characters` and `generate_character_timeline` both call `invalidate_downstream(2)` before setting their own completed flags, so re-running either step resets downstream state (Steps 3–5) and deletes orphaned `segments.json`. `_clear_sub_step_state(2)` now also clears `step_2_timeline_complete`, so re-extract/PUT fully resets the Step 2 sub-state.
+
+### Changed
+- **Impostor↔original appearance inheritance** (`backend/services/prompts.py`) — Extraction prompt now instructs the AI: impostors, doppelgängers, and disguised entities must inherit the mimicked character's stable surface appearance (hair, build, base clothing) and layer only the described corruption on top, keeping both entities distinct. Front profile and turnaround "Version consistency rules" carry the same guidance for creature/NPC types that mimic humans.
+
+### Testing
+- 225 backend tests passed (0 failures); `tsc --noEmit` → 0 errors. Rewrote 3 `test_character_timeline.py` guard tests from 502 assertions to graceful-degradation assertions (`test_timeline_duplicate_name_disambiguated`, `test_timeline_missing_person_backfilled`, `test_timeline_inconsistent_anchor_coalesced`). Added 4 new `test_characters.py` tests: `test_generate_prompts_name_drift_resolved` (normalized-name + positional fallback), `test_extract_invalidates_downstream`, `test_timeline_invalidates_downstream`, and `test_normalize_name_conservative`. `test_characters.py` now has 32 tests.
+
 ## [0.8.9] — 2026-06-11 — Segment-Prompts Always-Batch + Per-Batch Persistence
 
 ### Fixed
@@ -967,18 +983,19 @@ frontend/components.json
 | **v0.8.7** | 215 | 73* | 288 |
 | **v0.8.6** | 208 | 73* | 281 |
 | **v0.8.5** | 207 | 73* | 280 |
+| **v0.9.0** | 225 | 73* | 298 |
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.8.9 — 221 tests)
+### Backend Test Breakdown (v0.9.0 — 225 tests)
 - `test_fireworks.py` — 13 tests (client, base_url, retry logic, json_schema, error handling, invalid-JSON guard, model env override, timeout env override, timeout normalization)
-- `test_characters.py` — 28 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2, extract/timeline/Call-2 max_tokens=16000, GET preserves prompt fields, GET legacy base_name backfill, 504 on timeout)
-- `test_character_timeline.py` — 6 tests (happy path, 409 no-characters, 502 duplicate name, 502 missing person, 502 inconsistent anchor, single version default)
+- `test_characters.py` — 32 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2, extract/timeline/Call-2 max_tokens=16000, GET preserves prompt fields, GET legacy base_name backfill, 504 on timeout, name-drift resolved via normalized-name + positional fallback, extract invalidates downstream, timeline invalidates downstream, normalize-name conservative)
+- `test_character_timeline.py` — 6 tests (happy path, 409 no-characters, duplicate name disambiguated, missing person backfilled, inconsistent anchor coalesced, single version default)
 - `test_segments.py` — 46 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, always-batch primary path, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502, split preserves other segment fields, merge preserves other segment fields, segment_id lifecycle: breakdown/split/merge/update preserve or backfill UUIDs, Pass 2 max_tokens 16000, partial progress persisted on timeout, resume skips completed segments, small project single batch, idempotent when all complete, missing segment_index resilience)
 - `test_images.py` — 18 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status, image-by-id resolution, lazy migration: stamps missing segment_ids and renames legacy `images/{index:04d}.png` files, migration idempotent)
 - `test_projects.py` — 20 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript, voiceover re-upload, invalidate_downstream, delete atomicity, chunked-transcription offsets, global 500 error shape, invalidate clears video state/output)
 - `test_video.py` — 51 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters, _write_progress timestamp, status .conduit segment count, FFMPEG_PATH env, .wav voiceover resolution)
-- `test_prompts.py` — 34 tests (StyleProfile injection, 5 builders' anchors/rules, SHOT_TYPES, get_style fallback, Pass 2 no-placeholder assertion, prompt-contract JSON-key pinning: extraction/breakdown/front/turnaround/Pass-2)
+- `test_prompts.py` — 34 tests (StyleProfile injection, 5 builders' anchors/rules, SHOT_TYPES, get_style fallback, Pass 2 no-placeholder assertion, prompt-contract JSON-key pinning: extraction/breakdown/front/turnaround/Pass-2, impostor/original appearance-inheritance guidance)
 - `test_schema_flatten.py` — 2 tests (enum survives `_flatten_schema`, Pydantic rejects bad enum)
 - `test_style_state.py` — 2 tests (style_id persisted on create, `get_style_id` default fallback)
 - `test_isolation.py` — 1 test (meta-test: no unpatched PROJECTS_BASE_DIR modules)

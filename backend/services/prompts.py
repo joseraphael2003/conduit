@@ -101,6 +101,7 @@ def build_character_extraction_messages(script: str) -> list[dict]:
         "- description: a detailed visual description of the character's appearance, clothing, and expression. "
         "If the script does not describe them in detail, infer a visually interesting design that fits the narrative. "
         "Do NOT leave fields blank.\n\n"
+        "If a creature or NPC entity mimics or impersonates a human character, it must inherit that human character's stable facial / anatomical traits and layer its own corruption or disguise details on top.\n\n"
         'Return ONLY a JSON object with a top-level "characters" array. Each element of "characters" is an object with fields: name, type, importance, description.'
     )
     user = f"<script>\n{script}\n</script>"
@@ -178,6 +179,7 @@ def build_front_profile_messages(characters: object, style: StyleProfile) -> lis
         "- If identity_anchor is present, it describes stable facial / anatomical traits that MUST stay consistent "
         "across every version of this character. Preserve these traits in the generated prompt.\n"
         "- If version_label and appears_from are present, the prompt must reflect this specific life-stage only.\n"
+        "- If a creature or NPC entity mimics a human, it must preserve the mimicked human's identity_anchor and layer its own corruption or disguise on top.\n"
         "- Do NOT mix traits from different versions into the same prompt.\n\n"
         'Return ONLY a JSON object with a top-level "characters" array; each element has fields: name, front_profile_prompt.'
     )
@@ -223,6 +225,7 @@ def build_turnaround_messages(characters: object, style: StyleProfile) -> list[d
         "- If identity_anchor is present, it describes stable facial / anatomical traits that MUST stay consistent "
         "across every version of this character. Preserve these traits in the generated prompt.\n"
         "- If version_label and appears_from are present, the prompt must reflect this specific life-stage only.\n"
+        "- If a creature or NPC entity mimics a human, it must preserve the mimicked human's identity_anchor and layer its own corruption or disguise on top.\n"
         "- Do NOT mix traits from different versions into the same prompt.\n\n"
         'Return ONLY a JSON object with a top-level "characters" array; each element has fields: name, turnaround_prompt.'
     )
