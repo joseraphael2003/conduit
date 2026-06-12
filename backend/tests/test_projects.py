@@ -204,9 +204,9 @@ async def test_invalidate_downstream_step_2(async_client, cleanup_projects, temp
     assert sub_state.get("step_3_pass_1_complete") is None
     assert sub_state.get("step_3_pass_2_complete") is None
     assert sub_state.get("step_4_images_uploaded") is None
-    # Step 2 sub-steps: call-1 and timeline preserved; call-2 cleared (must rerun after version edit)
+    # Step 2 sub-steps: call-1 preserved; timeline and call-2 cleared (must rerun after version edit)
     assert sub_state.get("step_2_call_1_complete") is True
-    assert sub_state.get("step_2_timeline_complete") is True
+    assert sub_state.get("step_2_timeline_complete") is None
     assert sub_state.get("step_2_call_2_complete") is None
 
 

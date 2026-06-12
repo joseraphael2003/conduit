@@ -262,19 +262,20 @@ async def generate_character_timeline(project_uuid: str):
         seen_names.add(char.name)
 
     # Guard: every original base_name/person must yield at least one version → backfill
-    original_base_names = {}
+    original_by_norm = {}
     for char in characters:
         base = char.get("base_name", "") or char.get("name", "")
-        original_base_names.setdefault(base, []).append(char)
+        original_by_norm.setdefault(_normalize_name(base), []).append(char)
 
-    result_base_names = set(char.base_name for char in validated.characters)
-    missing = set(original_base_names.keys()) - result_base_names
-    for base_name in missing:
+    result_norms = {_normalize_name(c.base_name) for c in validated.characters}
+    missing = set(original_by_norm) - result_norms
+    for norm in missing:
+        base_name = original_by_norm[norm][0].get("base_name", "") or original_by_norm[norm][0].get("name", "")
         logging.warning(
             "Timeline missing versions for base_name %s; backfilling from Call 1",
             base_name,
         )
-        template = original_base_names[base_name][0]
+        template = original_by_norm[norm][0]
         backfill = CharacterDescription(
             name=template.get("name", base_name),
             type=template.get("type", "speaking"),
@@ -291,9 +292,11 @@ async def generate_character_timeline(project_uuid: str):
     # Guard: identity_anchor must be consistent per base_name → coalesce
     anchor_by_base = {}
     for char in validated.characters:
-        if char.base_name not in anchor_by_base:
+        if char.identity_anchor and char.base_name not in anchor_by_base:
             anchor_by_base[char.base_name] = char.identity_anchor
-        elif anchor_by_base[char.base_name] != char.identity_anchor:
+
+    for char in validated.characters:
+        if char.base_name in anchor_by_base and char.identity_anchor != anchor_by_base[char.base_name]:
             logging.warning(
                 "Coalescing inconsistent identity_anchor for base_name %s",
                 char.base_name,
