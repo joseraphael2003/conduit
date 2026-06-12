@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { CopyButton } from "@/components/CopyButton";
 import { Upload, Info, Image as ImageIcon, X } from "@phosphor-icons/react";
 import { apiBase } from "@/config";
 
@@ -172,6 +173,11 @@ export function Step4Images({ onStateChange }: Step4ImagesProps) {
                 <span className="font-mono text-xs text-[#8A8A9A] uppercase tracking-wide">
                   Segment {segment.segment_index}
                 </span>
+                <CopyButton
+                  text={segment.segment_prompt}
+                  ariaLabel={`Copy prompt for segment ${segment.segment_index}`}
+                  disabled={!segment.segment_prompt}
+                />
               </div>
 
               {/* Thumbnail or Placeholder */}
@@ -274,7 +280,15 @@ export function Step4Images({ onStateChange }: Step4ImagesProps) {
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="font-mono text-xs text-[#8A8A9A] uppercase tracking-wide">Segment Prompt</span>
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs text-[#8A8A9A] uppercase tracking-wide">Segment Prompt</span>
+                  <CopyButton
+                    text={selectedSegment.segment_prompt}
+                    ariaLabel="Copy segment prompt"
+                    label="Copy"
+                    disabled={!selectedSegment.segment_prompt}
+                  />
+                </div>
                 <p className="font-body text-sm text-[#E8E8F0]">{selectedSegment.segment_prompt}</p>
               </div>
 

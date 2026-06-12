@@ -5,7 +5,6 @@ import { SkeletonTable } from "@/components/SkeletonTable";
 import { AmberBar } from "@/components/AmberBar";
 import {
   User,
-  Copy,
   Code,
   ArrowClockwise,
   Sparkle,
@@ -14,6 +13,7 @@ import {
   Trash,
   Clock,
 } from "@phosphor-icons/react";
+import { CopyButton } from "@/components/CopyButton";
 import { apiBase } from "@/config";
 
 interface Character {
@@ -74,7 +74,6 @@ export function Step2Characters({ onStateChange }: Step2CharactersProps) {
   const [error, setError] = useState<string | null>(null);
   const [hasEdits, setHasEdits] = useState(false);
   const [showJson, setShowJson] = useState<Record<string, boolean>>({});
-  const [copiedMap, setCopiedMap] = useState<Record<string, boolean>>({});
   const [projectState, setProjectState] = useState<string | null>(null);
 
   useEffect(() => {
@@ -293,28 +292,6 @@ export function Step2Characters({ onStateChange }: Step2CharactersProps) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setGeneratingPrompts(false);
-    }
-  };
-
-  const handleCopy = async (text: string, key: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedMap((prev) => ({ ...prev, [key]: true }));
-      setTimeout(() => {
-        setCopiedMap((prev) => ({ ...prev, [key]: false }));
-      }, 2000);
-    } catch {
-      // Fallback
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-      setCopiedMap((prev) => ({ ...prev, [key]: true }));
-      setTimeout(() => {
-        setCopiedMap((prev) => ({ ...prev, [key]: false }));
-      }, 2000);
     }
   };
 
@@ -701,19 +678,12 @@ export function Step2Characters({ onStateChange }: Step2CharactersProps) {
                       <span className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A]">
                         Front Profile Prompt
                       </span>
-                      <button
-                        onClick={() =>
-                          handleCopy(
-                            char.front_profile_prompt ?? "",
-                            `front-${char.name}`
-                          )
-                        }
-                        className="flex items-center gap-1 text-[#8A8A9A] hover:text-[#E8E8F0] font-body text-xs"
-                        aria-label={`Copy front profile prompt for ${char.name}`}
-                      >
-                        <Copy size={12} weight="regular" />
-                        {copiedMap[`front-${char.name}`] ? "Copied" : "Copy"}
-                      </button>
+                      <CopyButton
+                        text={char.front_profile_prompt ?? ""}
+                        ariaLabel={`Copy front profile prompt for ${char.name}`}
+                        label="Copy"
+                        size={12}
+                      />
                     </div>
                     <p className="font-body text-sm text-[#E8E8F0] bg-[#1A1A24] p-3 border border-[#2A2A35] whitespace-pre-wrap">
                       {char.front_profile_prompt}
@@ -724,19 +694,12 @@ export function Step2Characters({ onStateChange }: Step2CharactersProps) {
                       <span className="font-body text-xs font-semibold tracking-wide uppercase text-[#8A8A9A]">
                         Turnaround Prompt
                       </span>
-                      <button
-                        onClick={() =>
-                          handleCopy(
-                            char.turnaround_prompt ?? "",
-                            `turn-${char.name}`
-                          )
-                        }
-                        className="flex items-center gap-1 text-[#8A8A9A] hover:text-[#E8E8F0] font-body text-xs"
-                        aria-label={`Copy turnaround prompt for ${char.name}`}
-                      >
-                        <Copy size={12} weight="regular" />
-                        {copiedMap[`turn-${char.name}`] ? "Copied" : "Copy"}
-                      </button>
+                      <CopyButton
+                        text={char.turnaround_prompt ?? ""}
+                        ariaLabel={`Copy turnaround prompt for ${char.name}`}
+                        label="Copy"
+                        size={12}
+                      />
                     </div>
                     <p className="font-body text-sm text-[#E8E8F0] bg-[#1A1A24] p-3 border border-[#2A2A35] whitespace-pre-wrap">
                       {char.turnaround_prompt}
