@@ -77,6 +77,18 @@ def _normalize_name(name: str) -> str:
         return ""
     return " ".join(name.lower().split())
 
+def _coalesce_anchors(characters: list) -> None:
+    """Two-pass: coalesce every version of a base_name to the first
+    non-empty identity_anchor in its group. Mutates in place."""
+    anchor_by_base = {}
+    for char in characters:
+        if char.identity_anchor and char.base_name not in anchor_by_base:
+            anchor_by_base[char.base_name] = char.identity_anchor
+    for char in characters:
+        if char.base_name in anchor_by_base and char.identity_anchor != anchor_by_base[char.base_name]:
+            logging.warning("Coalescing inconsistent identity_anchor for base_name %s", char.base_name)
+            char.identity_anchor = anchor_by_base[char.base_name]
+
 
 @characters_router.post(
     "/projects/{project_uuid}/characters/extract",
@@ -270,38 +282,23 @@ async def generate_character_timeline(project_uuid: str):
     result_norms = {_normalize_name(c.base_name) for c in validated.characters}
     missing = set(original_by_norm) - result_norms
     for norm in missing:
-        base_name = original_by_norm[norm][0].get("base_name", "") or original_by_norm[norm][0].get("name", "")
-        logging.warning(
-            "Timeline missing versions for base_name %s; backfilling from Call 1",
-            base_name,
-        )
-        template = original_by_norm[norm][0]
-        backfill = CharacterDescription(
-            name=template.get("name", base_name),
-            type=template.get("type", "speaking"),
-            importance=template.get("importance", "minor"),
-            description=template.get("description", ""),
-            base_name=base_name,
-            version_label="default",
-            version_index=0,
-            appears_from="",
-            identity_anchor="",
-        )
-        validated.characters.append(backfill)
+        for template in original_by_norm[norm]:
+            base_name = template.get("base_name", "") or template.get("name", "")
+            logging.warning("Timeline missing versions for base_name %s; backfilling from Call 1", base_name)
+            validated.characters.append(CharacterDescription(
+                name=template.get("name", base_name),
+                type=template.get("type", "speaking"),
+                importance=template.get("importance", "minor"),
+                description=template.get("description", ""),
+                base_name=base_name,
+                version_label="default",
+                version_index=0,
+                appears_from="",
+                identity_anchor="",
+            ))
 
     # Guard: identity_anchor must be consistent per base_name → coalesce
-    anchor_by_base = {}
-    for char in validated.characters:
-        if char.identity_anchor and char.base_name not in anchor_by_base:
-            anchor_by_base[char.base_name] = char.identity_anchor
-
-    for char in validated.characters:
-        if char.base_name in anchor_by_base and char.identity_anchor != anchor_by_base[char.base_name]:
-            logging.warning(
-                "Coalescing inconsistent identity_anchor for base_name %s",
-                char.base_name,
-            )
-            char.identity_anchor = anchor_by_base[char.base_name]
+    _coalesce_anchors(validated.characters)
 
     # Persist expanded list
     with open(characters_path, "w", encoding="utf-8") as f:
