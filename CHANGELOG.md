@@ -5,6 +5,18 @@ All notable changes to the Conduit project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.9] — 2026-06-11 — Segment-Prompts Always-Batch + Per-Batch Persistence
+
+### Fixed
+- **Segment prompts now always generate in small batches** (`backend/routers/segments.py`) — the previous primary path sent all segments in a single AI call, which timed out on slow providers (e.g. umans) for projects with >25 segments. The endpoint now always batches via `_generate_and_persist_prompts`, using tunable `batch_size` (default 12) and `overlap` (default 5). Segments are merged and persisted to `segments.json` after every batch, so a mid-run timeout leaves partial progress on disk.
+- **Resume on retry** — the driver only regenerates segments lacking a non-empty `segment_prompt`. Re-running the endpoint after a 504 resumes where the prior call left off, without redundant AI calls for completed batches.
+- **Guarded state advance** — `step_3_complete` / `step_3_pass_2_complete` are only set when `all(s.get("segment_prompt") for s in segments)`. If any segment is still empty (e.g., a batch failed or was omitted), the project stays at `step_2_complete` and the wizard correctly shows Step 3 as incomplete.
+- **Env-tunable batch knobs** (`backend/.env.example`) — `CONDUIT_SEGMENT_BATCH_SIZE` and `CONDUIT_SEGMENT_BATCH_OVERLAP` override the defaults (12 / 5). `max(1, …)` and `min(…, batch_size-1)` guards prevent zero or oversized overlap.
+- **Removed dead token-limit fallback path** — `_generate_prompts_in_batches` and `_is_token_limit_error` are deleted. The batching path was previously reachable only after a 413/Context-length error; it is now the primary path.
+
+### Testing
+- 221 backend tests passed (0 failures); `tsc --noEmit` → 0 errors. Rewrote `test_segments.py` batch-fallback test into `test_generate_prompts_always_batches` (+ overlap-win assertion), removed the obsolete truncation-fallback test, aligned `missing_segment_index_resilience` with the new state-advance guard, and added 4 new tests: `partial_progress_persisted_on_timeout`, `resume_skips_completed`, `small_project_single_batch`, `idempotent_when_all_complete`. `test_segments.py` now has 46 tests.
+
 ## [0.8.8] — 2026-06-11 — AI Timeout Sizing + 504 Mapping
 
 ### Fixed
@@ -950,6 +962,7 @@ frontend/components.json
 | **v0.8.2** | 183 | 73* | 256 |
 | **v0.8.3** | 196 | 73* | 269 |
 | **v0.8.4** | 199 | 73* | 272 |
+| **v0.8.9** | 221 | 73* | 294 |
 | **v0.8.8** | 218 | 73* | 291 |
 | **v0.8.7** | 215 | 73* | 288 |
 | **v0.8.6** | 208 | 73* | 281 |
@@ -957,11 +970,11 @@ frontend/components.json
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.8.8 — 218 tests)
+### Backend Test Breakdown (v0.8.9 — 221 tests)
 - `test_fireworks.py` — 13 tests (client, base_url, retry logic, json_schema, error handling, invalid-JSON guard, model env override, timeout env override, timeout normalization)
 - `test_characters.py` — 28 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2, extract/timeline/Call-2 max_tokens=16000, GET preserves prompt fields, GET legacy base_name backfill, 504 on timeout)
 - `test_character_timeline.py` — 6 tests (happy path, 409 no-characters, 502 duplicate name, 502 missing person, 502 inconsistent anchor, single version default)
-- `test_segments.py` — 43 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, batch fallback, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502, split preserves other segment fields, merge preserves other segment fields, segment_id lifecycle: breakdown/split/merge/update preserve or backfill UUIDs, Pass 2 truncation fix: max_tokens 16000, truncation triggers overlapping-batch fallback, bad JSON without truncation does not fallback, missing segment_index resilience)
+- `test_segments.py` — 46 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, always-batch primary path, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502, split preserves other segment fields, merge preserves other segment fields, segment_id lifecycle: breakdown/split/merge/update preserve or backfill UUIDs, Pass 2 max_tokens 16000, partial progress persisted on timeout, resume skips completed segments, small project single batch, idempotent when all complete, missing segment_index resilience)
 - `test_images.py` — 18 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status, image-by-id resolution, lazy migration: stamps missing segment_ids and renames legacy `images/{index:04d}.png` files, migration idempotent)
 - `test_projects.py` — 20 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript, voiceover re-upload, invalidate_downstream, delete atomicity, chunked-transcription offsets, global 500 error shape, invalidate clears video state/output)
 - `test_video.py` — 51 tests (generate, status, download, SRT, effects, ffmpeg mocks, zoompan filters, _write_progress timestamp, status .conduit segment count, FFMPEG_PATH env, .wav voiceover resolution)

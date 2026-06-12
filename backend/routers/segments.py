@@ -31,6 +31,8 @@ segments_router = APIRouter()
 
 BREAKDOWN_MAX_TOKENS = 16000
 SEGMENT_PROMPTS_MAX_TOKENS = 16000
+SEGMENT_PROMPT_BATCH_SIZE = int(os.environ.get("CONDUIT_SEGMENT_BATCH_SIZE", 12))
+SEGMENT_PROMPT_BATCH_OVERLAP = int(os.environ.get("CONDUIT_SEGMENT_BATCH_OVERLAP", 5))
 
 
 def _handle_fireworks_error(exc: Exception) -> None:
@@ -80,14 +82,17 @@ def _save_json(path: str, data: dict) -> None:
         json.dump(data, f, indent=2)
 
 
-def _is_token_limit_error(exc: Exception) -> bool:
-    """Detect if an exception indicates a token limit or request too long."""
-    status_code = getattr(exc, "status_code", None)
-    if status_code == 413:
-        return True
-    message = str(exc).lower()
-    token_keywords = ["token limit", "too many tokens", "max tokens", "context length", "too long", "truncated", "invalid or truncated json"]
-    return any(kw in message for kw in token_keywords)
+def _merge_prompts_into_segments(segments: List[dict], batch_results: List[dict]) -> None:
+    result_map = {r["segment_index"]: r for r in batch_results
+                  if isinstance(r, dict) and "segment_index" in r}
+    for seg in segments:
+        idx = seg.get("segment_index")
+        if idx in result_map:
+            seg["segment_prompt"] = result_map[idx].get("segment_prompt", "")
+            seg["characters_present"] = result_map[idx].get("characters_present", [])
+        seg.setdefault("segment_prompt", "")
+        seg.setdefault("characters_present", [])
+        seg.setdefault("effect", "none")
 
 
 async def _generate_prompts_for_batch(
@@ -109,24 +114,19 @@ async def _generate_prompts_for_batch(
     return result["segments"]
 
 
-async def _generate_prompts_in_batches(
-    segments: List[dict],
-    characters_data: dict,
-    client: FireworksClient,
-    uuid: str,
-) -> List[dict]:
-    """Fallback: generate prompts in overlapping batches."""
-    batch_size = 25
-    overlap = 5
-    result_map: dict = {}
+async def _generate_and_persist_prompts(segments, characters_data, client, uuid, segments_path):
+    batch_size = max(1, SEGMENT_PROMPT_BATCH_SIZE)
+    overlap = max(0, min(SEGMENT_PROMPT_BATCH_OVERLAP, batch_size - 1))
+    step = batch_size - overlap
+    pending = [s for s in segments if not s.get("segment_prompt")]
     i = 0
-    while i < len(segments):
-        batch = segments[i : i + batch_size]
+    while i < len(pending):
+        batch = pending[i : i + batch_size]
         batch_results = await _generate_prompts_for_batch(batch, characters_data, client, uuid)
-        for seg in batch_results:
-            result_map[seg["segment_index"]] = seg
-        i += batch_size - overlap
-    return [result_map[seg["segment_index"]] for seg in segments if seg["segment_index"] in result_map]
+        _merge_prompts_into_segments(segments, batch_results)
+        _save_json(segments_path, {"segments": segments})   # persist after EACH batch
+        i += step
+    return segments
 
 
 @segments_router.post("/projects/{uuid}/segments/breakdown", response_model=Segments)
@@ -472,7 +472,7 @@ async def generate_segment_prompts(uuid: str):
 
     client = FireworksClient()
     try:
-        result = await _generate_prompts_for_batch(segments, characters_data, client, uuid)
+        segments = await _generate_and_persist_prompts(segments, characters_data, client, uuid, segments_path)
     except (AuthenticationError, RateLimitError, APIError, ValueError) as exc:
         if isinstance(exc, ValueError):
             logging.error("AI returned an unexpected response", exc_info=exc)
@@ -480,55 +480,26 @@ async def generate_segment_prompts(uuid: str):
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="AI returned an unexpected response",
             ) from exc
-        if isinstance(exc, APIError) and _is_token_limit_error(exc):
+        _handle_fireworks_error(exc)
+
+    # Only advance state if every segment now has a prompt
+    if all(s.get("segment_prompt") for s in segments):
+        # Update main SQLite state to step_3_complete if currently at step_2_complete
+        if current_state == ProjectState.STEP_2_COMPLETE:
             try:
-                result = await _generate_prompts_in_batches(segments, characters_data, client, uuid)
-            except (AuthenticationError, RateLimitError, APIError, ValueError) as batch_exc:
-                if isinstance(batch_exc, ValueError):
-                    logging.error("AI returned an unexpected response", exc_info=batch_exc)
-                    raise HTTPException(
-                        status_code=status.HTTP_502_BAD_GATEWAY,
-                        detail="AI returned an unexpected response",
-                    ) from batch_exc
-                _handle_fireworks_error(batch_exc)
-        else:
-            _handle_fireworks_error(exc)
+                await update_state(uuid, ProjectState.STEP_3_COMPLETE)
+            except HTTPException:
+                # If state transition fails (e.g., already updated), ignore
+                pass
 
-    # Build a map of segment_index -> result
-    result_map = {seg["segment_index"]: seg for seg in result if isinstance(seg, dict) and "segment_index" in seg}
+        # Update sub-step state in state.json
+        state_json_path = os.path.join(conduit_dir, "state.json")
+        if os.path.exists(state_json_path):
+            state_data = _load_json(state_json_path)
+            state_data["step_3_pass_2_complete"] = True
+            _save_json(state_json_path, state_data)
 
-    # Update original segments with prompts
-    updated_segments = []
-    for seg in segments:
-        idx = seg.get("segment_index")
-        if idx in result_map:
-            seg["segment_prompt"] = result_map[idx].get("segment_prompt", "")
-            seg["characters_present"] = result_map[idx].get("characters_present", [])
-        else:
-            seg.setdefault("segment_prompt", "")
-            seg.setdefault("characters_present", [])
-        seg.setdefault("effect", "none")
-        updated_segments.append(seg)
-
-    # Save segments.json (preserves breakdown data, adds prompts)
-    _save_json(segments_path, {"segments": updated_segments})
-
-    # Update main SQLite state to step_3_complete if currently at step_2_complete
-    if current_state == ProjectState.STEP_2_COMPLETE:
-        try:
-            await update_state(uuid, ProjectState.STEP_3_COMPLETE)
-        except HTTPException:
-            # If state transition fails (e.g., already updated), ignore
-            pass
-
-    # Update sub-step state in state.json
-    state_json_path = os.path.join(conduit_dir, "state.json")
-    if os.path.exists(state_json_path):
-        state_data = _load_json(state_json_path)
-        state_data["step_3_pass_2_complete"] = True
-        _save_json(state_json_path, state_data)
-
-    return SegmentPrompts(segments=[SegmentPrompt(**seg) for seg in updated_segments])
+    return SegmentPrompts(segments=[SegmentPrompt(**seg) for seg in segments])
 
 
 @segments_router.post("/projects/{uuid}/segments/{segment_index}/prompt", response_model=SegmentPrompt)

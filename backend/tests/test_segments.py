@@ -620,9 +620,9 @@ async def test_generate_prompts_rate_limit_error(async_client, cleanup_projects,
 
 
 @pytest.mark.asyncio
-async def test_generate_prompts_batch_fallback(async_client, cleanup_projects, temp_projects_dir):
-    """POST prompts uses overlapping batch fallback when token limit is exceeded."""
-    create_resp = await async_client.post("/api/v1/projects", json={"name": "Batch Fallback"})
+async def test_generate_prompts_always_batches(async_client, cleanup_projects, temp_projects_dir):
+    """POST prompts always uses overlapping batches; no single-call-first fallback."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Always Batches"})
     assert create_resp.status_code == 201
     project_uuid = create_resp.json()["uuid"]
 
@@ -631,7 +631,7 @@ async def test_generate_prompts_batch_fallback(async_client, cleanup_projects, t
 
     conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
 
-    # Create 26 segments to trigger batch fallback
+    # Create 26 segments to trigger multiple batches
     segments = {"segments": []}
     for i in range(26):
         segments["segments"].append({
@@ -654,14 +654,141 @@ async def test_generate_prompts_batch_fallback(async_client, cleanup_projects, t
         call_count += 1
 
         if call_count == 1:
-            # First call (single call) should fail with 413
-            return httpx.Response(413, json={"error": "Context length exceeded"})
-
-        # Batch calls
-        if call_count == 2:
-            # Batch 0 response: segments 0-24
             batch_segments = []
-            for i in range(25):
+            for i in range(12):
+                batch_segments.append({
+                    "segment_index": i,
+                    "script_line": f"Line {i}.",
+                    "segment_prompt": f"Batch0 prompt for line {i}.",
+                    "characters_present": ["Alice"],
+                    "start_time": float(i),
+                    "end_time": float(i + 1),
+                    "duration": 1.0,
+                })
+        elif call_count == 2:
+            batch_segments = []
+            for i in range(7, 19):
+                batch_segments.append({
+                    "segment_index": i,
+                    "script_line": f"Line {i}.",
+                    "segment_prompt": f"Batch1 prompt for line {i}.",
+                    "characters_present": ["Alice"],
+                    "start_time": float(i),
+                    "end_time": float(i + 1),
+                    "duration": 1.0,
+                })
+        elif call_count == 3:
+            batch_segments = []
+            for i in range(14, 26):
+                batch_segments.append({
+                    "segment_index": i,
+                    "script_line": f"Line {i}.",
+                    "segment_prompt": f"Batch2 prompt for line {i}.",
+                    "characters_present": ["Alice"],
+                    "start_time": float(i),
+                    "end_time": float(i + 1),
+                    "duration": 1.0,
+                })
+        elif call_count == 4:
+            batch_segments = []
+            for i in range(21, 26):
+                batch_segments.append({
+                    "segment_index": i,
+                    "script_line": f"Line {i}.",
+                    "segment_prompt": f"Batch3 prompt for line {i}.",
+                    "characters_present": ["Alice"],
+                    "start_time": float(i),
+                    "end_time": float(i + 1),
+                    "duration": 1.0,
+                })
+        else:
+            return httpx.Response(500, json={"error": "unexpected call"})
+
+        return httpx.Response(200, json={
+            "id": "test-id",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps({"segments": batch_segments}),
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+        })
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(side_effect=side_effect)
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/prompts")
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        data = resp.json()
+        assert len(data["segments"]) == 26
+
+        # All segments have non-empty prompts
+        for seg in data["segments"]:
+            assert seg["segment_prompt"], f"Segment {seg['segment_index']} missing prompt"
+
+        # >= 3 AI calls (actually 4 with default batch_size=12/overlap=5)
+        assert call_count >= 3
+
+        # Later-batch overlap wins on shared indices
+        assert data["segments"][6]["segment_prompt"] == "Batch0 prompt for line 6."
+        assert data["segments"][7]["segment_prompt"] == "Batch1 prompt for line 7."
+        assert data["segments"][11]["segment_prompt"] == "Batch1 prompt for line 11."
+        assert data["segments"][14]["segment_prompt"] == "Batch2 prompt for line 14."
+        assert data["segments"][18]["segment_prompt"] == "Batch2 prompt for line 18."
+        assert data["segments"][21]["segment_prompt"] == "Batch3 prompt for line 21."
+        assert data["segments"][25]["segment_prompt"] == "Batch3 prompt for line 25."
+
+    # Verify segments.json preserved and updated
+    with open(os.path.join(conduit_dir, "segments.json"), "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert len(saved["segments"]) == 26
+    assert saved["segments"][21]["segment_prompt"] == "Batch3 prompt for line 21."
+    assert saved["segments"][25]["segment_prompt"] == "Batch3 prompt for line 25."
+
+
+@pytest.mark.asyncio
+async def test_generate_prompts_partial_progress_persisted_on_timeout(async_client, cleanup_projects, temp_projects_dir):
+    """First batch succeeds, second batch times out; partial progress persisted."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Timeout Progress"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+
+    segments = {"segments": []}
+    for i in range(26):
+        segments["segments"].append({
+            "segment_index": i,
+            "script_line": f"Line {i}.",
+            "start_time": float(i),
+            "end_time": float(i + 1),
+            "duration": 1.0,
+        })
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    characters = {"characters": [{"name": "Alice", "type": "speaking", "importance": "major", "description": "A girl"}]}
+    with open(os.path.join(temp_projects_dir, project_uuid, "characters.json"), "w", encoding="utf-8") as f:
+        json.dump(characters, f)
+
+    call_count = 0
+    def side_effect(request):
+        nonlocal call_count
+        call_count += 1
+
+        if call_count == 1:
+            batch_segments = []
+            for i in range(12):
                 batch_segments.append({
                     "segment_index": i,
                     "script_line": f"Line {i}.",
@@ -687,10 +814,83 @@ async def test_generate_prompts_batch_fallback(async_client, cleanup_projects, t
                     }
                 ],
             })
-        else:
-            # Batch 1 response: segments 20-25
+        raise httpx.ReadTimeout("Request timed out")
+
+    with respx.mock:
+        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(side_effect=side_effect)
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/prompts")
+        assert resp.status_code == 504, f"Expected 504, got {resp.status_code}: {resp.text}"
+
+    # Assert segments.json has partial progress
+    with open(os.path.join(conduit_dir, "segments.json"), "r", encoding="utf-8") as f:
+        saved = json.load(f)
+    assert len(saved["segments"]) == 26
+    for i in range(12):
+        assert saved["segments"][i]["segment_prompt"] == f"Batch0 prompt for line {i}."
+    for i in range(12, 26):
+        assert saved["segments"][i]["segment_prompt"] == ""
+
+    # Assert project state did NOT advance
+    state_resp = await async_client.get(f"/api/v1/projects/{project_uuid}")
+    assert state_resp.status_code == 200
+    project_state = state_resp.json()["state"]
+    assert project_state != "step_3_complete"
+
+
+@pytest.mark.asyncio
+async def test_generate_prompts_resume_skips_completed(async_client, cleanup_projects, temp_projects_dir):
+    """Pre-seeded prompts cause only pending segments to be sent to AI."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Resume Skips"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+
+    # Create 26 segments, pre-seed first 12 with prompts
+    segments = {"segments": []}
+    for i in range(26):
+        seg = {
+            "segment_index": i,
+            "script_line": f"Line {i}.",
+            "start_time": float(i),
+            "end_time": float(i + 1),
+            "duration": 1.0,
+        }
+        if i < 12:
+            seg["segment_prompt"] = f"Preseeded prompt {i}"
+            seg["characters_present"] = ["Alice"]
+        segments["segments"].append(seg)
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    characters = {"characters": [{"name": "Alice", "type": "speaking", "importance": "major", "description": "A girl"}]}
+    with open(os.path.join(temp_projects_dir, project_uuid, "characters.json"), "w", encoding="utf-8") as f:
+        json.dump(characters, f)
+
+    call_count = 0
+    def side_effect(request):
+        nonlocal call_count
+        call_count += 1
+
+        if call_count == 1:
             batch_segments = []
-            for i in range(20, 26):
+            for i in range(12, 24):
+                batch_segments.append({
+                    "segment_index": i,
+                    "script_line": f"Line {i}.",
+                    "segment_prompt": f"Batch0 prompt for line {i}.",
+                    "characters_present": ["Alice"],
+                    "start_time": float(i),
+                    "end_time": float(i + 1),
+                    "duration": 1.0,
+                })
+        elif call_count == 2:
+            batch_segments = []
+            for i in range(19, 26):
                 batch_segments.append({
                     "segment_index": i,
                     "script_line": f"Line {i}.",
@@ -700,22 +900,25 @@ async def test_generate_prompts_batch_fallback(async_client, cleanup_projects, t
                     "end_time": float(i + 1),
                     "duration": 1.0,
                 })
-            return httpx.Response(200, json={
-                "id": "test-id",
-                "object": "chat.completion",
-                "created": 1234567890,
-                "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": json.dumps({"segments": batch_segments}),
-                        },
-                        "finish_reason": "stop",
-                    }
-                ],
-            })
+        else:
+            return httpx.Response(500, json={"error": "unexpected call"})
+
+        return httpx.Response(200, json={
+            "id": "test-id",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps({"segments": batch_segments}),
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+        })
 
     with respx.mock:
         respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(side_effect=side_effect)
@@ -724,17 +927,156 @@ async def test_generate_prompts_batch_fallback(async_client, cleanup_projects, t
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         data = resp.json()
         assert len(data["segments"]) == 26
-        # Overlapping segments should use later batch result (batch 1 overwrites batch 0 for 20-24)
-        assert data["segments"][20]["segment_prompt"] == "Batch1 prompt for line 20."
-        assert data["segments"][24]["segment_prompt"] == "Batch1 prompt for line 24."
-        assert data["segments"][25]["segment_prompt"] == "Batch1 prompt for line 25."
 
-    # Verify segments.json preserved and updated
-    with open(os.path.join(conduit_dir, "segments.json"), "r", encoding="utf-8") as f:
-        saved = json.load(f)
-    assert len(saved["segments"]) == 26
-    assert saved["segments"][20]["segment_prompt"] == "Batch1 prompt for line 20."
-    assert saved["segments"][25]["segment_prompt"] == "Batch1 prompt for line 25."
+        # AI called only for pending remainder (2 batches instead of 4)
+        assert call_count == 2
+
+        # Pre-seeded prompts preserved
+        for i in range(12):
+            assert data["segments"][i]["segment_prompt"] == f"Preseeded prompt {i}"
+
+        # New prompts populated
+        for i in range(12, 26):
+            assert data["segments"][i]["segment_prompt"]
+
+    # Assert state advanced
+    state_resp = await async_client.get(f"/api/v1/projects/{project_uuid}")
+    assert state_resp.status_code == 200
+    project_state = state_resp.json()["state"]
+    assert project_state == "step_3_complete"
+
+
+@pytest.mark.asyncio
+async def test_generate_prompts_small_project_single_batch(async_client, cleanup_projects, temp_projects_dir):
+    """Small project with 5 segments triggers exactly 1 AI call."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Single Batch"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+
+    segments = {"segments": []}
+    for i in range(5):
+        segments["segments"].append({
+            "segment_index": i,
+            "script_line": f"Line {i}.",
+            "start_time": float(i),
+            "end_time": float(i + 1),
+            "duration": 1.0,
+        })
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    characters = {"characters": [{"name": "Alice", "type": "speaking", "importance": "major", "description": "A girl"}]}
+    with open(os.path.join(temp_projects_dir, project_uuid, "characters.json"), "w", encoding="utf-8") as f:
+        json.dump(characters, f)
+
+    with respx.mock:
+        route = respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "test-id",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({
+                                    "segments": [
+                                        {
+                                            "segment_index": i,
+                                            "script_line": f"Line {i}.",
+                                            "segment_prompt": f"Prompt {i}.",
+                                            "characters_present": ["Alice"],
+                                            "start_time": float(i),
+                                            "end_time": float(i + 1),
+                                            "duration": 1.0,
+                                        }
+                                        for i in range(5)
+                                    ]
+                                }),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/prompts")
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        data = resp.json()
+        assert len(data["segments"]) == 5
+        for i in range(5):
+            assert data["segments"][i]["segment_prompt"] == f"Prompt {i}."
+
+        # Exactly 1 AI call
+        assert route.call_count == 1
+
+    # Assert state advanced
+    state_resp = await async_client.get(f"/api/v1/projects/{project_uuid}")
+    assert state_resp.status_code == 200
+    project_state = state_resp.json()["state"]
+    assert project_state == "step_3_complete"
+
+
+@pytest.mark.asyncio
+async def test_generate_prompts_idempotent_when_all_complete(async_client, cleanup_projects, temp_projects_dir):
+    """All segments pre-seeded with prompts: 0 AI calls, 200, state advances."""
+    create_resp = await async_client.post("/api/v1/projects", json={"name": "Idempotent"})
+    assert create_resp.status_code == 201
+    project_uuid = create_resp.json()["uuid"]
+
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
+    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
+
+    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
+
+    segments = {"segments": []}
+    for i in range(5):
+        segments["segments"].append({
+            "segment_index": i,
+            "script_line": f"Line {i}.",
+            "start_time": float(i),
+            "end_time": float(i + 1),
+            "duration": 1.0,
+            "segment_prompt": f"Preseeded prompt {i}",
+            "characters_present": ["Alice"],
+        })
+    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
+        json.dump(segments, f)
+
+    characters = {"characters": [{"name": "Alice", "type": "speaking", "importance": "major", "description": "A girl"}]}
+    with open(os.path.join(temp_projects_dir, project_uuid, "characters.json"), "w", encoding="utf-8") as f:
+        json.dump(characters, f)
+
+    with respx.mock:
+        route = respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(
+            return_value=httpx.Response(500, json={"error": "should not be called"})
+        )
+
+        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/prompts")
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        data = resp.json()
+        assert len(data["segments"]) == 5
+        for i in range(5):
+            assert data["segments"][i]["segment_prompt"] == f"Preseeded prompt {i}"
+
+        # 0 AI calls
+        assert route.call_count == 0
+
+    # Assert state advanced
+    state_resp = await async_client.get(f"/api/v1/projects/{project_uuid}")
+    assert state_resp.status_code == 200
+    project_state = state_resp.json()["state"]
+    assert project_state == "step_3_complete"
 
 
 @pytest.mark.asyncio
@@ -2233,71 +2575,6 @@ async def test_generate_prompts_max_tokens_16000(async_client, cleanup_projects,
         assert body["max_tokens"] == 16000
 
 
-@pytest.mark.asyncio
-async def test_generate_prompts_truncation_triggers_fallback(async_client, cleanup_projects, temp_projects_dir):
-    """POST prompts triggers batch fallback when primary call is truncated."""
-    create_resp = await async_client.post("/api/v1/projects", json={"name": "Truncation Fallback"})
-    assert create_resp.status_code == 201
-    project_uuid = create_resp.json()["uuid"]
-
-    await async_client.put(f"/api/v1/projects/{project_uuid}/step/1")
-    await async_client.put(f"/api/v1/projects/{project_uuid}/step/2")
-
-    conduit_dir = os.path.join(temp_projects_dir, project_uuid, ".conduit")
-    segments = {
-        "segments": [
-            {"segment_index": 0, "script_line": "Hello.", "start_time": 0.0, "end_time": 1.0, "duration": 1.0},
-            {"segment_index": 1, "script_line": "World.", "start_time": 1.0, "end_time": 2.0, "duration": 1.0},
-        ]
-    }
-    with open(os.path.join(conduit_dir, "segments.json"), "w", encoding="utf-8") as f:
-        json.dump(segments, f)
-
-    characters = {"characters": [{"name": "Alice", "type": "speaking", "importance": "major", "description": "A girl"}]}
-    with open(os.path.join(temp_projects_dir, project_uuid, "characters.json"), "w", encoding="utf-8") as f:
-        json.dump(characters, f)
-
-    call_count = 0
-    def side_effect(request):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return httpx.Response(502, json={"error": "truncated"})
-        return httpx.Response(
-            200,
-            json={
-                "id": "test-id",
-                "object": "chat.completion",
-                "created": 1234567890,
-                "model": "accounts/fireworks/routers/kimi-k2p6-turbo",
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": json.dumps({
-                                "segments": [
-                                    {"segment_index": 0, "script_line": "Hello.", "segment_prompt": "Prompt 0.", "characters_present": [], "start_time": 0.0, "end_time": 1.0, "duration": 1.0},
-                                    {"segment_index": 1, "script_line": "World.", "segment_prompt": "Prompt 1.", "characters_present": [], "start_time": 1.0, "end_time": 2.0, "duration": 1.0},
-                                ]
-                            }),
-                        },
-                        "finish_reason": "stop",
-                    }
-                ],
-            },
-        )
-
-    with respx.mock:
-        respx.post("https://api.fireworks.ai/inference/v1/chat/completions").mock(side_effect=side_effect)
-        resp = await async_client.post(f"/api/v1/projects/{project_uuid}/segments/prompts")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "segments" in data
-        assert len(data["segments"]) == 2
-        assert data["segments"][0]["segment_prompt"] == "Prompt 0."
-        assert data["segments"][1]["segment_prompt"] == "Prompt 1."
-
 
 @pytest.mark.asyncio
 async def test_generate_prompts_missing_segment_index_resilience(async_client, cleanup_projects, temp_projects_dir):
@@ -2429,11 +2706,11 @@ async def test_generate_prompts_missing_segment_index_resilience(async_client, c
     assert saved["segments"][1]["segment_prompt"] == ""
     assert saved["segments"][1]["characters_present"] == []
 
-    # Assert state.json updated
+    # Assert state.json NOT updated because segment 1 lacks a prompt
     state_path = os.path.join(conduit_dir, "state.json")
     with open(state_path, "r", encoding="utf-8") as f:
         state_data = json.load(f)
-    assert state_data.get("step_3_pass_2_complete") is True
+    assert state_data.get("step_3_pass_2_complete") is None
 
 
 @pytest.mark.asyncio
