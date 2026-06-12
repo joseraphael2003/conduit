@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Timeline-flag clearing on re-extract/PUT** (`backend/routers/characters.py`, `backend/services/state.py`) — `extract_characters` and character `PUT` both call `invalidate_downstream(2)`; `_clear_sub_step_state(2)` now also clears `step_2_timeline_complete`, so re-extract or manual character edits fully reset the timeline sub-state and downstream Steps 3–5.
-- **Normalized missing-versions guard** (`backend/routers/characters.py`) — `_normalize_name` now guards against drift-doubling when AI paraphrases a name but the count still matches; missing versions are backfilled with a single default entry using the original extraction description, eliminating the previous 502 on normalized-name drift with missing persons.
+- **Normalized missing-versions guard** (`backend/routers/characters.py`) — `_normalize_name` now guards against drift-doubling when AI paraphrases a name; missing versions are backfilled only for persons absent from the normalized timeline result, eliminating the previous 502 on normalized-name drift with missing persons.
 - **Two-pass non-empty anchor coalesce** (`backend/routers/characters.py`) — `_coalesce_anchors` now makes two passes: first builds a map of non-empty anchors per `base_name`, then coalesces every version in the group to that anchor. Empty or missing `identity_anchor` fields no longer leave siblings inconsistent.
 
 ### Added
@@ -17,6 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Testing
 - 226 backend tests passed (0 failures); `tsc --noEmit` → 0 errors. Added `test_timeline_drifted_base_name_not_doubled` to `test_character_timeline.py` (now 7 tests).
+
+## [0.9.2] — 2026-06-12 — Deviation Fixes
+
+### Refactored
+- **Extract `_coalesce_anchors` helper** (`backend/routers/characters.py`) — extracted the two-pass anchor coalescing logic into a dedicated helper for clarity and reuse.
+
+### Fixed
+- **Multi-char missing-versions backfill** (`backend/routers/characters.py`) — missing versions are now backfilled only for persons absent from the normalized timeline result, preventing over-backfill when multiple characters drift.
+- **CHANGELOG wording (normalized coverage)** (`CHANGELOG.md`) — line 12 reworded to clarify that missing versions are backfilled only for persons absent from the normalized timeline result.
+
+### Added
+- **Disabled Copy button title tooltip** (`frontend/src/components/CopyButton.tsx`) — added a title tooltip to the disabled Copy button state for accessibility.
+
+### Testing
+- 227 backend tests passed (0 failures); `tsc --noEmit` → 0 errors. Added `test_multi_char_missing_versions_backfill` to `test_character_timeline.py` (now 8 tests).
 
 ## [0.9.0] — 2026-06-12 — Character Pipeline Resilience
 
@@ -996,15 +1011,16 @@ frontend/components.json
 | **v0.8.7** | 215 | 73* | 288 |
 | **v0.8.8** | 218 | 73* | 291 |
 | **v0.8.9** | 221 | 73* | 294 |
-| **v0.9.1** | 226 | 73* | 299 |
 | **v0.9.0** | 225 | 73* | 298 |
+| **v0.9.1** | 226 | 73* | 299 |
+| **v0.9.2** | 227 | 73* | 300 |
 
 \* Frontend count last recorded at v0.6.0; v0.7.0 changed only TS types in `Step2Characters.tsx` (`tsc --noEmit` clean, no new specs added).
 
-### Backend Test Breakdown (v0.9.1 — 226 tests)
+### Backend Test Breakdown (v0.9.2 — 227 tests)
 - `test_fireworks.py` — 13 tests (client, base_url, retry logic, json_schema, error handling, invalid-JSON guard, model env override, timeout env override, timeout normalization)
 - `test_characters.py` — 32 tests (extract, two-batch prompts, system/user split, invalid-enum 502, name-mismatch 502, missing script, prerequisite, failures, GET/PUT, two-version Call 2, anchor injection, missing-version 502, PUT invalidates downstream, pre-version schema loading, pre-version Call 2, extract/timeline/Call-2 max_tokens=16000, GET preserves prompt fields, GET legacy base_name backfill, 504 on timeout, name-drift resolved via normalized-name + positional fallback, extract invalidates downstream, timeline invalidates downstream, normalize-name conservative)
-- `test_character_timeline.py` — 7 tests (happy path, 409 no-characters, duplicate name disambiguated, missing person backfilled, drifted base name not doubled, inconsistent anchor coalesced, single version default)
+- `test_character_timeline.py` — 8 tests (happy path, 409 no-characters, duplicate name disambiguated, missing person backfilled, drifted base name not doubled, inconsistent anchor coalesced, single version default, multi-char missing-versions backfill)
 - `test_segments.py` — 46 tests (breakdown, prompts, split, merge, missing files, prerequisite, failures, always-batch primary path, style-anchor assertions, flashback non-monotonic, end-to-end override, Pass 2 versioned characters, single-segment regen, regen with character versions, regen bad index, breakdown max_tokens, invalid JSON 502, GET returns prompt fields, PUT persists prompt edits, PUT preserves omitted fields, pre-prompt safety, Pass 2 ValueError 502, regenerate ValueError 502, split preserves other segment fields, merge preserves other segment fields, segment_id lifecycle: breakdown/split/merge/update preserve or backfill UUIDs, Pass 2 max_tokens 16000, partial progress persisted on timeout, resume skips completed segments, small project single batch, idempotent when all complete, missing segment_index resilience)
 - `test_images.py` — 18 tests (upload, non-PNG, wrong ratio, RGBA, low resolution, GET, not found, batch status, image-by-id resolution, lazy migration: stamps missing segment_ids and renames legacy `images/{index:04d}.png` files, migration idempotent)
 - `test_projects.py` — 20 tests (CRUD, cascade, state machine, Whisper mock, not found, transcript, voiceover re-upload, invalidate_downstream, delete atomicity, chunked-transcription offsets, global 500 error shape, invalidate clears video state/output)
